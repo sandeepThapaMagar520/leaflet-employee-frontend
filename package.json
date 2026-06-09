@@ -1,0 +1,26 @@
+{
+  "name": "employee-management-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "15.3.2",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.18",
+    "@types/react": "19.0.10",
+    "@types/react-dom": "19.0.4",
+    "@tailwindcss/postcss": "4.1.7",
+    "eslint": "9.24.0",
+    "eslint-config-next": "15.3.2",
+    "tailwindcss": "4.1.7",
+    "typescript": "5.8.3"
+  }
+}
