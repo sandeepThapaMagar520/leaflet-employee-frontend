@@ -23,6 +23,28 @@ The app runs at `http://localhost:3000`.
 
 Use `.env.example` as the template for local configuration. Do not commit `.env`, `.env.local`, or any production secrets.
 
+For production, set:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=https://leaflet-employee-backend.onrender.com/api/v1
+```
+
+## Vercel Deployment
+
+Create a Vercel project from this repository.
+
+- Framework preset: `Next.js`
+- Root directory: leave empty
+- Build command: `npm run build`
+- Output directory: leave default
+- Install command: `npm install`
+
+Required environment variable:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=https://leaflet-employee-backend.onrender.com/api/v1
+```
+
 ## Scripts
 
 ```bash
