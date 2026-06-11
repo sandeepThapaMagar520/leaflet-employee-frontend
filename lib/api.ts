@@ -462,6 +462,27 @@ export type AttendanceSession = {
   totalHours: number | null;
 };
 
+export type AttendanceDayStatus =
+  | "NO_ACTIVITY"
+  | "IN_PROGRESS"
+  | "UNDER_HOURS"
+  | "COMPLETED_WITH_GRACE"
+  | "COMPLETED";
+
+export type AttendanceDaySummary = {
+  userId: number;
+  userFullName: string;
+  workDate: string;
+  firstStartTime: string | null;
+  lastEndTime: string | null;
+  activeSessionStartTime: string | null;
+  totalMinutes: number;
+  requiredMinutes: number;
+  graceMinutes: number;
+  remainingMinutes: number;
+  status: AttendanceDayStatus;
+};
+
 export async function startAttendanceSession() {
   return request<AttendanceSession>("/attendance/start", { method: "POST" });
 }
@@ -476,6 +497,15 @@ export async function getMyAttendanceSessions() {
 
 export async function getAllAttendanceSessions() {
   return request<AttendanceSession[]>("/attendance");
+}
+
+export async function getMyTodayAttendanceSummary() {
+  return request<AttendanceDaySummary>("/attendance/me/today");
+}
+
+export async function getTeamDailyAttendanceSummary(date?: string) {
+  const query = date ? `?date=${encodeURIComponent(date)}` : "";
+  return request<AttendanceDaySummary[]>(`/attendance/daily${query}`);
 }
 
 export async function getActiveAttendanceSession() {
