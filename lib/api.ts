@@ -22,6 +22,44 @@ export type AuthResponse = {
   fullName: string;
   email: string;
   role: Role;
+  emailVerified?: boolean;
+  mustChangePassword?: boolean;
+  profilePhotoUrl?: string | null;
+};
+
+export type StaffRegistrationResponse = {
+  userId: number;
+  fullName: string;
+  email: string;
+  role: Role;
+  message: string;
+};
+
+export type Profile = {
+  id: number;
+  fullName: string;
+  email: string;
+  role: Role;
+  active: boolean;
+  profilePhotoUrl: string | null;
+  phone: string | null;
+  jobTitle: string | null;
+  department: string | null;
+  timezone: string;
+  emailVerified: boolean;
+  mustChangePassword: boolean;
+  lastLoginAt: string | null;
+  passwordChangedAt: string | null;
+};
+
+export type NotificationPreferences = {
+  emailTaskAssigned: boolean;
+  emailTaskCompleted: boolean;
+  emailTaskCommented: boolean;
+  emailTaskDueSoon: boolean;
+  emailTaskOverdue: boolean;
+  emailProjectAssigned: boolean;
+  emailLeaveUpdates: boolean;
 };
 
 export type User = {
@@ -246,7 +284,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
-    if (response.status === 401 && !path.startsWith("/auth/login")) {
+    const isPublicAuthRequest = [
+      "/auth/login",
+      "/auth/verify-email",
+      "/auth/forgot-password",
+      "/auth/verify-password-otp",
+      "/auth/set-password",
+    ].some(publicPath => path.startsWith(publicPath));
+    if (response.status === 401 && !isPublicAuthRequest) {
       handleUnauthorized();
     }
     const errorMessage = await readErrorMessage(response, path);
@@ -278,6 +323,83 @@ export async function changePassword(payload: { currentPassword: string; newPass
   });
 }
 
+export async function requestEmailChange(newEmail: string) {
+  return request<{ message: string }>("/auth/change-email/request", {
+    method: "POST",
+    body: JSON.stringify({ newEmail: newEmail.trim() }),
+  });
+}
+
+export async function verifyEmailChange(otp: string) {
+  return request<AuthResponse>("/auth/change-email/verify", {
+    method: "POST",
+    body: JSON.stringify({ otp }),
+  });
+}
+
+export async function requestPasswordReset(email: string) {
+  return request<{ message: string }>("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email: email.trim() }),
+  });
+}
+
+export async function verifyPasswordOtp(payload: { email: string; otp: string }) {
+  return request<{ resetToken: string; message: string }>("/auth/verify-password-otp", {
+    method: "POST",
+    body: JSON.stringify({ ...payload, email: payload.email.trim() }),
+  });
+}
+
+export async function setPassword(payload: { resetToken: string; newPassword: string }) {
+  return request<{ message: string }>("/auth/set-password", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function verifyEmail(token: string) {
+  return request<{ message: string }>("/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function resendVerificationEmail() {
+  return request<{ message: string }>("/auth/resend-verification", {
+    method: "POST",
+  });
+}
+
+export async function getMyProfile() {
+  return request<Profile>("/users/me");
+}
+
+export async function updateMyProfile(payload: {
+  fullName?: string;
+  phone?: string;
+  jobTitle?: string;
+  department?: string;
+  timezone?: string;
+  profilePhotoUrl?: string;
+}) {
+  return request<Profile>("/users/me", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getNotificationPreferences() {
+  return request<NotificationPreferences>("/users/me/notification-preferences");
+}
+
+export async function updateNotificationPreferences(payload: Partial<NotificationPreferences>) {
+  return request<NotificationPreferences>("/users/me/notification-preferences", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function getUsers() {
   return request<User[]>("/users");
 }
@@ -301,12 +423,11 @@ export async function getAllTasksPaged(page = 0, size = 20) {
 export async function registerUser(payload: {
   fullName: string;
   email: string;
-  password: string;
   role: Role;
 }) {
-  return request<AuthResponse>("/auth/register", {
+  return request<StaffRegistrationResponse>("/auth/register", {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, email: payload.email.trim() }),
   });
 }
 

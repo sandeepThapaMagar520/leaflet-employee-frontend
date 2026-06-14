@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import NotificationBell from "./NotificationBell";
+import ProfileMenu from "./ProfileMenu";
 
 type StoredUser = {
   fullName: string;
@@ -16,7 +17,9 @@ export default function Topbar() {
     if (raw) {
       try {
         setUser(JSON.parse(raw));
-      } catch (e) {}
+      } catch {
+        setUser(null);
+      }
     }
   }, []);
 
@@ -42,28 +45,10 @@ export default function Topbar() {
           {user?.role === "ADMIN" ? "Administration and approvals" : user?.role === "MANAGER" ? "Team operations" : "Personal work overview"}
         </p>
       </div>
-      
+
       <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
         <NotificationBell />
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{user?.fullName || "User"}</div>
-          <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "capitalize" }}>{user?.role?.toLowerCase() || "Employee"}</div>
-        </div>
-        <div style={{
-          width: "40px",
-          height: "40px",
-          borderRadius: "50%",
-          background: "linear-gradient(135deg, #0f766e, #2563eb)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontWeight: "bold",
-          fontSize: "1.2rem",
-          color: "white",
-          boxShadow: "0 10px 24px rgba(15, 118, 110, 0.2)"
-        }}>
-          {user?.fullName?.charAt(0) || "U"}
-        </div>
+        <ProfileMenu />
       </div>
     </header>
   );

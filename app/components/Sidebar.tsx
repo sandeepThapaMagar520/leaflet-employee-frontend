@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { clearAuthSession } from "@/lib/auth";
 import { usePathname } from "next/navigation";
 
 import { useEffect, useState } from "react";
@@ -29,7 +28,6 @@ export default function Sidebar() {
 
   const links = [
     { href: "/dashboard", label: "Dashboard", icon: "📊" },
-    { href: "/profile", label: "Profile", icon: "👤" },
     { href: "/attendance", label: userRole === "ADMIN" ? "Team Attendance" : "Attendance", icon: "⏱️" },
     { href: "/logs", label: userRole === "ADMIN" ? "Team Logs" : "Daily Logs", icon: "📝" },
     { href: "/leave", label: userRole === "ADMIN" || userRole === "MANAGER" ? "Leave Requests" : "Leave", icon: "🌿" },
@@ -118,15 +116,9 @@ export default function Sidebar() {
       </nav>
 
       <div style={{ padding: "0 24px", marginTop: "auto" }}>
-        <button 
-          onClick={() => {
-            clearAuthSession();
-            window.location.href = "/login";
-          }}
-          className="btn-secondary" style={{ width: "100%", display: "flex", justifyContent: "center", gap: "8px" }}
-        >
-          <span>🚪</span> Logout
-        </button>
+        <p style={{ fontSize: "0.72rem", color: "var(--text-secondary)", textAlign: "center", lineHeight: 1.5 }}>
+          Account settings are in the top-right menu.
+        </p>
       </div>
     </aside>
   );

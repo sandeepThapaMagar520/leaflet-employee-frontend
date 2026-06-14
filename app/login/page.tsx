@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import { login } from "@/lib/api";
 import { setAuthSession } from "@/lib/auth";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -31,7 +32,11 @@ export default function LoginPage() {
       localStorage.setItem("access_token", result.accessToken);
       localStorage.setItem("auth_user", JSON.stringify(result));
       setAuthSession();
-      router.push("/dashboard");
+      if (result.mustChangePassword) {
+        router.push("/profile?tab=security");
+      } else {
+        router.push("/dashboard");
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Sign in failed. Please try again.");
     } finally {
@@ -114,7 +119,15 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label style={{ display: "block", marginBottom: "8px", fontSize: "0.9rem", fontWeight: 500 }}>Password</label>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", marginBottom: "8px" }}>
+              <label style={{ fontSize: "0.9rem", fontWeight: 500 }}>Password</label>
+              <Link
+                href="/reset-password"
+                style={{ color: "var(--primary-color)", fontSize: "0.85rem", fontWeight: 600, textDecoration: "none" }}
+              >
+                Forgot password?
+              </Link>
+            </div>
             <input
               type="password"
               value={password}
@@ -133,6 +146,10 @@ export default function LoginPage() {
           >
             {isLoading ? "Authenticating..." : "Sign in"}
           </button>
+
+          <p className="text-muted" style={{ fontSize: "0.82rem", lineHeight: 1.55, textAlign: "center" }}>
+            New staff should use the OTP link sent to their email to create their first password.
+          </p>
 
           {message && (
             <div

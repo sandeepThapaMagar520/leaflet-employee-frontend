@@ -7,7 +7,9 @@ import Topbar from "./Topbar";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isAuthPage = pathname === "/login";
+  const isAuthPage = ["/login", "/verify-email", "/reset-password"].some(
+    path => pathname === path || pathname.startsWith(`${path}/`)
+  );
 
   if (isAuthPage) {
     return <>{children}</>;

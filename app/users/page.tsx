@@ -34,7 +34,6 @@ export default function UsersAdminPage() {
   // Form state
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("EMPLOYEE");
   const [submitting, setSubmitting] = useState(false);
 
@@ -84,9 +83,9 @@ export default function UsersAdminPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await registerUser({ fullName, email, password, role });
-      toast.success(`${role} "${fullName}" registered successfully!`);
-      setFullName(""); setEmail(""); setPassword(""); setRole("EMPLOYEE");
+      const result = await registerUser({ fullName, email, role });
+      toast.success(result.message);
+      setFullName(""); setEmail(""); setRole("EMPLOYEE");
       setShowForm(false);
       await loadData(0);
     } catch (error) {
@@ -193,18 +192,6 @@ export default function UsersAdminPage() {
               />
             </div>
             <div>
-              <label style={{ display: "block", marginBottom: "8px", fontSize: "0.9rem", color: "var(--text-secondary)" }}>Temporary Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                minLength={8}
-                placeholder="Min. 8 characters"
-                style={{ width: "100%" }}
-              />
-            </div>
-            <div>
               <label style={{ display: "block", marginBottom: "8px", fontSize: "0.9rem", color: "var(--text-secondary)" }}>Role</label>
               <select value={role} onChange={e => setRole(e.target.value as Role)} style={{ width: "100%" }}>
                 {roleOptions.map(r => <option key={r} value={r}>{r}</option>)}
@@ -213,6 +200,9 @@ export default function UsersAdminPage() {
             <button type="submit" className="btn-primary mt-4" disabled={submitting}>
               {submitting ? "Registering..." : "Register Staff"}
             </button>
+            <p className="text-muted text-sm" style={{ lineHeight: 1.6 }}>
+              The staff member will receive a six-digit email OTP. They must verify it before the new-password form becomes available.
+            </p>
           </form>
         </div>
       )}
