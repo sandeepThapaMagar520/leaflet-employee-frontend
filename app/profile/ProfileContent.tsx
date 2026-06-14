@@ -72,8 +72,6 @@ export default function ProfileContent() {
 
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
-  const [jobTitle, setJobTitle] = useState("");
-  const [department, setDepartment] = useState("");
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -132,8 +130,6 @@ export default function ProfileContent() {
         setLogs(logList);
         setFullName(profileData.fullName);
         setPhone(profileData.phone ?? "");
-        setJobTitle(profileData.jobTitle ?? "");
-        setDepartment(profileData.department ?? "");
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to load profile");
       } finally {
@@ -179,8 +175,6 @@ export default function ProfileContent() {
       const updated = await updateMyProfile({
         fullName: fullName.trim(),
         phone: phone.trim(),
-        jobTitle: jobTitle.trim(),
-        department: department.trim(),
       });
       setProfile(updated);
       const raw = localStorage.getItem("auth_user");
@@ -350,10 +344,6 @@ export default function ProfileContent() {
               <span>Job title</span>
               <strong>{profile.jobTitle || "Not set"}</strong>
             </div>
-            <div>
-              <span>Department</span>
-              <strong>{profile.department || "Not set"}</strong>
-            </div>
           </div>
         </div>
       </header>
@@ -438,11 +428,8 @@ export default function ProfileContent() {
                   </label>
                   <label>
                     <span>Job title</span>
-                    <input value={jobTitle} onChange={e => setJobTitle(e.target.value)} placeholder="e.g. Project Manager" />
-                  </label>
-                  <label>
-                    <span>Department</span>
-                    <input value={department} onChange={e => setDepartment(e.target.value)} placeholder="e.g. Operations" />
+                    <input value={profile.jobTitle || "Not set"} disabled />
+                    <small className="text-muted">Job titles are managed by an administrator.</small>
                   </label>
                 </div>
                 <div className="profile-form-actions">

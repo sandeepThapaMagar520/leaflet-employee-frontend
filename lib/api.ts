@@ -68,6 +68,8 @@ export type User = {
   email: string;
   role: Role;
   active: boolean;
+  jobTitle: string | null;
+  profilePhotoUrl: string | null;
 };
 
 export type PageResponse<T> = {
@@ -191,6 +193,29 @@ export type LeaveRequest = {
   createdAt: string;
 };
 
+export type StaffOverview = {
+  staff: User;
+  summary: {
+    projectCount: number;
+    activeProjectCount: number;
+    taskCount: number;
+    completedTaskCount: number;
+    overdueTaskCount: number;
+    attendanceHoursLast30Days: number;
+    attendanceDaysLast30Days: number;
+    lastAttendanceAt: string | null;
+    approvedLeaveDaysThisYear: number;
+    pendingLeaveRequests: number;
+    dailyLogCount: number;
+    latestDailyLogDate: string | null;
+  };
+  projects: Project[];
+  tasks: Task[];
+  attendanceSessions: AttendanceSession[];
+  leaveRequests: LeaveRequest[];
+  dailyLogs: DailyLog[];
+};
+
 export type LeaveBalance = {
   annualAllowance: number;
   approvedDays: number;
@@ -286,6 +311,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const isPublicAuthRequest = [
       "/auth/login",
+      "/auth/start-account-setup",
       "/auth/verify-email",
       "/auth/forgot-password",
       "/auth/verify-password-otp",
@@ -344,6 +370,13 @@ export async function requestPasswordReset(email: string) {
   });
 }
 
+export async function startAccountSetup(payload: { email: string; temporaryPassword: string }) {
+  return request<{ message: string }>("/auth/start-account-setup", {
+    method: "POST",
+    body: JSON.stringify({ ...payload, email: payload.email.trim() }),
+  });
+}
+
 export async function verifyPasswordOtp(payload: { email: string; otp: string }) {
   return request<{ resetToken: string; message: string }>("/auth/verify-password-otp", {
     method: "POST",
@@ -378,8 +411,6 @@ export async function getMyProfile() {
 export async function updateMyProfile(payload: {
   fullName?: string;
   phone?: string;
-  jobTitle?: string;
-  department?: string;
   timezone?: string;
   profilePhotoUrl?: string;
 }) {
@@ -410,6 +441,10 @@ export async function getUsersPaged(page = 0, size = 20, search = "") {
   return request<PageResponse<User>>(`/users?${params.toString()}`);
 }
 
+export async function getStaffOverview(id: number) {
+  return request<StaffOverview>(`/users/${id}/overview`);
+}
+
 export async function getProjectsPaged(page = 0, size = 20) {
   const params = new URLSearchParams({ page: String(page), size: String(size) });
   return request<PageResponse<Project>>(`/projects?${params.toString()}`);
@@ -424,6 +459,8 @@ export async function registerUser(payload: {
   fullName: string;
   email: string;
   role: Role;
+  temporaryPassword: string;
+  jobTitle: string;
 }) {
   return request<StaffRegistrationResponse>("/auth/register", {
     method: "POST",
@@ -433,7 +470,7 @@ export async function registerUser(payload: {
 
 export async function updateUser(
   id: number,
-  payload: { fullName: string; email: string; role: Role; active: boolean }
+  payload: { fullName: string; email: string; role: Role; active: boolean; jobTitle: string }
 ) {
   return request<User>(`/users/${id}`, {
     method: "PUT",

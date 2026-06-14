@@ -148,7 +148,11 @@ export default function LoginPage() {
           </button>
 
           <p className="text-muted" style={{ fontSize: "0.82rem", lineHeight: 1.55, textAlign: "center" }}>
-            New staff should use the OTP link sent to their email to create their first password.
+            New staff?{" "}
+            <Link href="/reset-password?mode=setup" style={{ color: "var(--primary-color)", fontWeight: 600 }}>
+              Start first-time setup
+            </Link>
+            {" "}with the temporary password sent to your email.
           </p>
 
           {message && (
