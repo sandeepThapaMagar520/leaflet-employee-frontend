@@ -6,11 +6,12 @@ import {
   getProject, Project, Task, getTasksByProject,
   updateProject, ProjectStatus, updateTaskStatus, TaskStatus,
   getProjectPayments, createProjectPayment, ProjectPayment,
+  PaymentAttachment, updateProjectPaymentAttachments,
   getProjectNotes, createProjectNote, updateProjectNote, deleteProjectNote,
   ProjectNote, ProjectNoteType, uploadToCloudinary,
   getTaskComments, createTaskComment, TaskComment,
   getProjectMilestones, createProjectMilestone, completeProjectMilestone, reopenProjectMilestone, deleteProjectMilestone, ProjectMilestone,
-  getUsers, User,
+  getUsers, User, ProjectMemberPermission,
 } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
 import ActionModal from "@/app/components/ActionModal";
@@ -72,6 +73,9 @@ const ACCEPTED_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]);
 const FILE_INPUT_ACCEPT = ".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,image/*,application/pdf";
+const PAYMENT_BILL_ACCEPT = ".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf";
+const MAX_PAYMENT_BILLS = 5;
+const PAYMENT_BILL_MIME_TYPES = new Set(["image/jpeg", "image/png", "application/pdf"]);
 
 function fileKind(mime: string): "image" | "document" {
   return mime.startsWith("image/") ? "image" : "document";
@@ -169,6 +173,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [employees, setEmployees] = useState<User[]>([]);
   const [editManagerId, setEditManagerId] = useState<number>(0);
   const [editAssignedEmployeeIds, setEditAssignedEmployeeIds] = useState<number[]>([]);
+  const [memberPermissions, setMemberPermissions] = useState<Record<number, Omit<ProjectMemberPermission, "userId">>>({});
+  const [savedTeamSnapshot, setSavedTeamSnapshot] = useState("");
   const [selectedToAddIds, setSelectedToAddIds] = useState<number[]>([]);
   const [savingTeam, setSavingTeam] = useState(false);
 
@@ -176,7 +182,15 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [payAmount,      setPayAmount]      = useState("");
   const [payWhen,        setPayWhen]        = useState("");
   const [payNote,        setPayNote]        = useState("");
+  const [payAttachments, setPayAttachments] = useState<PaymentAttachment[]>([]);
+  const [uploadingPaymentBills, setUploadingPaymentBills] = useState(false);
   const [savingPayment,  setSavingPayment]  = useState(false);
+  const paymentBillInputRef = useRef<HTMLInputElement>(null);
+  const editPaymentBillInputRef = useRef<HTMLInputElement>(null);
+  const [editingPaymentBills, setEditingPaymentBills] = useState<ProjectPayment | null>(null);
+  const [editedPaymentAttachments, setEditedPaymentAttachments] = useState<PaymentAttachment[]>([]);
+  const [uploadingEditedPaymentBills, setUploadingEditedPaymentBills] = useState(false);
+  const [savingEditedPaymentBills, setSavingEditedPaymentBills] = useState(false);
   const [milestoneTitle, setMilestoneTitle] = useState("");
   const [milestoneDescription, setMilestoneDescription] = useState("");
   const [milestoneDueDate, setMilestoneDueDate] = useState("");
@@ -184,7 +198,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
   // notes form state
   const [noteCategory,    setNoteCategory]    = useState<NoteCategory>("GENERAL");
-  const [noteType,        setNoteType]        = useState<ProjectNoteType>("INTERNAL");
+  const [noteType,        setNoteType]        = useState<ProjectNoteType>("ADMIN_ONLY");
   const [noteText,        setNoteText]        = useState("");
   const [noteDate,        setNoteDate]        = useState<string>(new Date().toISOString().split("T")[0]);
   const [attachments,     setAttachments]     = useState<NoteAttachment[]>([]);
@@ -229,6 +243,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       setEditStatus(data.status);
       setEditManagerId(data.managerId);
       setEditAssignedEmployeeIds(data.assignedEmployees?.map(e => e.id) ?? []);
+      const loadedPermissions = Object.fromEntries(
+        (data.assignedEmployees ?? []).map(employee => [
+          employee.id,
+          { canManageTasks: employee.canManageTasks, canAddNotes: employee.canAddNotes },
+        ])
+      );
+      setMemberPermissions(loadedPermissions);
+      setSavedTeamSnapshot(teamSnapshot(data.managerId, data.assignedEmployees?.map(e => e.id) ?? [], loadedPermissions));
       setPayWhen(nowDatetimeLocal());
       setLoadingTasks(true); setLoadingPayments(true); setLoadingNotes(true);
       const [tasks, pays, notes, users, milestoneList] = await Promise.all([
@@ -280,12 +302,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         status: editStatus,
         managerId: editManagerId,
         assignedEmployeeIds: editAssignedEmployeeIds,
+        memberPermissions: buildMemberPermissions(),
         documentUrl: editDocs,
         budgetAmount: budgetNum,
       });
       setProject(updated);
       setEditManagerId(updated.managerId);
       setEditAssignedEmployeeIds(updated.assignedEmployees?.map(e => e.id) ?? []);
+      syncMemberPermissions(updated);
       setEditBudget(updated.budgetAmount ? String(updated.budgetAmount) : "");
       setFeedbackKind("success"); setFeedback("Project updated successfully.");
     } catch { setFeedbackKind("error"); setFeedback("Failed to update project."); }
@@ -309,12 +333,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         status: editStatus,
         managerId: editManagerId,
         assignedEmployeeIds: editAssignedEmployeeIds,
+        memberPermissions: buildMemberPermissions(),
         documentUrl: editDocs,
         budgetAmount: budgetNum,
       });
       setProject(updated);
       setEditManagerId(updated.managerId);
       setEditAssignedEmployeeIds(updated.assignedEmployees?.map(e => e.id) ?? []);
+      syncMemberPermissions(updated);
       setFeedbackKind("success");
       setFeedback("Team assignments updated.");
     } catch (err) {
@@ -337,6 +363,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       const merged = new Set([...prev, ...selectedToAddIds]);
       return Array.from(merged);
     });
+    setMemberPermissions(prev => {
+      const next = { ...prev };
+      selectedToAddIds.forEach(id => {
+        next[id] ??= { canManageTasks: false, canAddNotes: false };
+      });
+      return next;
+    });
     setSelectedToAddIds([]);
   }
 
@@ -350,18 +383,89 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
   function removeTeamMember(userId: number) {
     setEditAssignedEmployeeIds(prev => prev.filter(id => id !== userId));
+    setMemberPermissions(prev => {
+      const next = { ...prev };
+      delete next[userId];
+      return next;
+    });
+  }
+
+  function setMemberPermission(userId: number, key: "canManageTasks" | "canAddNotes", value: boolean) {
+    setMemberPermissions(prev => ({
+      ...prev,
+      [userId]: {
+        canManageTasks: prev[userId]?.canManageTasks ?? false,
+        canAddNotes: prev[userId]?.canAddNotes ?? false,
+        [key]: value,
+      },
+    }));
+  }
+
+  function buildMemberPermissions(): ProjectMemberPermission[] {
+    return editAssignedEmployeeIds.map(userId => ({
+      userId,
+      canManageTasks: memberPermissions[userId]?.canManageTasks ?? false,
+      canAddNotes: memberPermissions[userId]?.canAddNotes ?? false,
+    }));
+  }
+
+  function syncMemberPermissions(updated: Project) {
+    const updatedPermissions = Object.fromEntries(
+      (updated.assignedEmployees ?? []).map(employee => [
+        employee.id,
+        { canManageTasks: employee.canManageTasks, canAddNotes: employee.canAddNotes },
+      ])
+    );
+    setMemberPermissions(updatedPermissions);
+    setSavedTeamSnapshot(teamSnapshot(
+      updated.managerId,
+      updated.assignedEmployees?.map(employee => employee.id) ?? [],
+      updatedPermissions
+    ));
+  }
+
+  function teamSnapshot(
+    managerId: number,
+    employeeIds: number[],
+    permissions: Record<number, Omit<ProjectMemberPermission, "userId">>
+  ) {
+    return JSON.stringify({
+      managerId,
+      members: [...employeeIds].sort((a, b) => a - b).map(userId => ({
+        userId,
+        canManageTasks: permissions[userId]?.canManageTasks ?? false,
+        canAddNotes: permissions[userId]?.canAddNotes ?? false,
+      })),
+    });
   }
 
   const assignedMembers = editAssignedEmployeeIds.map(id => {
     const fromProject = project?.assignedEmployees?.find(e => e.id === id);
-    if (fromProject) return { id, fullName: fromProject.fullName, role: "EMPLOYEE" as const };
+    if (fromProject) {
+      return {
+        ...fromProject,
+        ...memberPermissions[id],
+        role: "EMPLOYEE" as const,
+      };
+    }
     const fromUsers = employees.find(e => e.id === id);
-    return { id, fullName: fromUsers?.fullName ?? `User #${id}`, role: "EMPLOYEE" as const };
+    return {
+      id,
+      fullName: fromUsers?.fullName ?? `User #${id}`,
+      role: "EMPLOYEE" as const,
+      canManageTasks: memberPermissions[id]?.canManageTasks ?? false,
+      canAddNotes: memberPermissions[id]?.canAddNotes ?? false,
+    };
   });
 
   const availableEmployees = employees.filter(e => !editAssignedEmployeeIds.includes(e.id));
 
   const editManagerName = managers.find(m => m.id === editManagerId)?.fullName ?? project.managerName;
+  const hasUnsavedTeamChanges = savedTeamSnapshot !== teamSnapshot(
+    editManagerId,
+    editAssignedEmployeeIds,
+    memberPermissions
+  );
 
   async function handleAddPayment() {
     if (!project) return;
@@ -375,8 +479,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       await createProjectPayment(project.id, {
         amount, paidAt: new Date(payWhen).toISOString(),
         referenceNote: payNote.trim() || undefined,
+        attachments: payAttachments.map(({ fileUrl, fileName, fileType }) => ({ fileUrl, fileName, fileType })),
       });
-      setPayAmount(""); setPayWhen(nowDatetimeLocal()); setPayNote("");
+      setPayAmount(""); setPayWhen(nowDatetimeLocal()); setPayNote(""); setPayAttachments([]);
       const [updatedProject, pays] = await Promise.all([
         getProject(project.id), getProjectPayments(project.id),
       ]);
@@ -386,6 +491,90 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       setFeedbackKind("error");
       setFeedback(err instanceof Error ? err.message : "Failed to record payment.");
     } finally { setSavingPayment(false); }
+  }
+
+  async function uploadPaymentBills(files: File[], existingCount: number) {
+    if (existingCount + files.length > MAX_PAYMENT_BILLS) {
+      throw new Error(`Maximum ${MAX_PAYMENT_BILLS} bills per payment.`);
+    }
+    for (const file of files) {
+      if (!PAYMENT_BILL_MIME_TYPES.has(file.type)) {
+        throw new Error(`"${file.name}" is not supported. Use PDF, JPG, or PNG.`);
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        throw new Error(`"${file.name}" exceeds the 10MB limit.`);
+      }
+    }
+
+    const uploaded: PaymentAttachment[] = [];
+    for (const file of files) {
+      const fileUrl = await uploadToCloudinary(file);
+      uploaded.push({ fileUrl, fileName: file.name, fileType: file.type });
+    }
+    return uploaded;
+  }
+
+  async function handlePaymentBillSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (!files.length) return;
+    setUploadingPaymentBills(true);
+    setFeedback("");
+    try {
+      const uploaded = await uploadPaymentBills(files, payAttachments.length);
+      setPayAttachments(previous => [...previous, ...uploaded]);
+      setFeedbackKind("success");
+      setFeedback(`${uploaded.length} bill${uploaded.length === 1 ? "" : "s"} uploaded.`);
+    } catch (err) {
+      setFeedbackKind("error");
+      setFeedback(err instanceof Error ? err.message : "Bill upload failed.");
+    } finally {
+      setUploadingPaymentBills(false);
+    }
+  }
+
+  function openPaymentBillEditor(payment: ProjectPayment) {
+    setEditingPaymentBills(payment);
+    setEditedPaymentAttachments(payment.attachments ?? []);
+  }
+
+  async function handleEditedPaymentBillSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (!files.length) return;
+    setUploadingEditedPaymentBills(true);
+    setFeedback("");
+    try {
+      const uploaded = await uploadPaymentBills(files, editedPaymentAttachments.length);
+      setEditedPaymentAttachments(previous => [...previous, ...uploaded]);
+    } catch (err) {
+      setFeedbackKind("error");
+      setFeedback(err instanceof Error ? err.message : "Bill upload failed.");
+    } finally {
+      setUploadingEditedPaymentBills(false);
+    }
+  }
+
+  async function saveEditedPaymentBills() {
+    if (!project || !editingPaymentBills) return;
+    setSavingEditedPaymentBills(true);
+    try {
+      await updateProjectPaymentAttachments(
+        project.id,
+        editingPaymentBills.id,
+        editedPaymentAttachments.map(({ fileUrl, fileName, fileType }) => ({ fileUrl, fileName, fileType }))
+      );
+      setProjectPayments(await getProjectPayments(project.id));
+      setEditingPaymentBills(null);
+      setEditedPaymentAttachments([]);
+      setFeedbackKind("success");
+      setFeedback("Payment bills updated.");
+    } catch (err) {
+      setFeedbackKind("error");
+      setFeedback(err instanceof Error ? err.message : "Failed to update payment bills.");
+    } finally {
+      setSavingEditedPaymentBills(false);
+    }
   }
 
   async function handleSaveNote() {
@@ -568,7 +757,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
   function resetNoteModal() {
     setNoteText(""); setNoteDate(new Date().toISOString().split("T")[0]);
-    setNoteCategory("GENERAL"); setNoteType("INTERNAL");
+    setNoteCategory("GENERAL"); setNoteType("ADMIN_ONLY");
     setAttachments([]);
     setEditingNoteId(null);
     setShowNoteModal(false);
@@ -759,11 +948,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           <div className="project-section-header">
             <div>
               <h2>Team</h2>
-              <p className="text-sm text-muted">Assign the project manager and employees working on this project.</p>
+              <p className="text-sm text-muted">Assign employees and choose who can manage tasks or add team notes.</p>
             </div>
-            <button type="button" className="btn-primary" disabled={savingTeam} onClick={() => void saveTeamAssignments()}>
-              {savingTeam ? "Saving…" : "Save Team"}
-            </button>
+            <span className={`team-save-state${hasUnsavedTeamChanges ? " pending" : ""}`}>
+              {hasUnsavedTeamChanges ? "Unsaved changes" : "All changes saved"}
+            </span>
           </div>
 
           <div className="project-card-static">
@@ -867,20 +1056,52 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               <div className="project-team-grid">
                 {assignedMembers.map(member => (
                   <div key={member.id} className="project-team-member">
-                    <div className="flex items-center gap-3" style={{ minWidth: 0 }}>
-                      <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "var(--accent-color)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.7rem", fontWeight: 700, flexShrink: 0 }}>
+                    <div className="project-team-identity">
+                      <div className="project-team-avatar">
                         {member.fullName.split(" ").map(n => n[0]).join("").slice(0, 2)}
                       </div>
-                      <span style={{ fontWeight: 500, fontSize: "0.9rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{member.fullName}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="project-team-name">{member.fullName}</div>
+                        <div className="text-xs text-muted">Project member</div>
+                      </div>
                     </div>
-                    <button type="button" className="btn-secondary" onClick={() => removeTeamMember(member.id)} style={{ padding: "6px 10px", fontSize: "0.75rem", color: "var(--danger-color)", flexShrink: 0 }}>
-                      Remove
-                    </button>
+                    <div className="project-member-permissions">
+                      <label className={memberPermissions[member.id]?.canManageTasks ? "active" : ""}>
+                        <input
+                          type="checkbox"
+                          checked={memberPermissions[member.id]?.canManageTasks ?? false}
+                          onChange={event => setMemberPermission(member.id, "canManageTasks", event.target.checked)}
+                        />
+                        <span><strong>Manage tasks</strong><small>Create, assign and edit</small></span>
+                      </label>
+                      <label className={memberPermissions[member.id]?.canAddNotes ? "active" : ""}>
+                        <input
+                          type="checkbox"
+                          checked={memberPermissions[member.id]?.canAddNotes ?? false}
+                          onChange={event => setMemberPermission(member.id, "canAddNotes", event.target.checked)}
+                        />
+                        <span><strong>Add notes</strong><small>Share with project team</small></span>
+                      </label>
+                      <button type="button" className="team-remove-button" onClick={() => removeTeamMember(member.id)} title={`Remove ${member.fullName}`}>
+                        Remove
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
+          {hasUnsavedTeamChanges && (
+            <div className="team-save-bar">
+              <div>
+                <strong>Team settings changed</strong>
+                <span>Save to apply assignments and permissions.</span>
+              </div>
+              <button type="button" className="btn-primary" disabled={savingTeam} onClick={() => void saveTeamAssignments()}>
+                {savingTeam ? "Saving…" : "Save team changes"}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1079,12 +1300,44 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             <div className="project-card-static">
               <h3 style={{ fontSize: "0.95rem", fontWeight: 600, marginBottom: "16px" }}>Record Payment</h3>
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                <div className="flex gap-2">
+                <div className="payment-primary-fields">
                   <input type="number" min={0.01} step="0.01" placeholder="Amount" value={payAmount} onChange={e => setPayAmount(e.target.value)} style={{ flex: 1 }} />
                   <input type="datetime-local" value={payWhen} onChange={e => setPayWhen(e.target.value)} style={{ flex: 1.2 }} />
                 </div>
                 <input placeholder="Reference note (optional)" value={payNote} onChange={e => setPayNote(e.target.value)} />
-                <button type="button" className="btn-primary" disabled={savingPayment} onClick={() => void handleAddPayment()}>
+                <div className="payment-bill-picker">
+                  <input
+                    ref={paymentBillInputRef}
+                    type="file"
+                    accept={PAYMENT_BILL_ACCEPT}
+                    multiple
+                    hidden
+                    onChange={e => void handlePaymentBillSelect(e)}
+                  />
+                  <div>
+                    <strong>Bills and receipts</strong>
+                    <span>Optional · PDF, JPG, or PNG · up to {MAX_PAYMENT_BILLS}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={uploadingPaymentBills || payAttachments.length >= MAX_PAYMENT_BILLS}
+                    onClick={() => paymentBillInputRef.current?.click()}
+                  >
+                    {uploadingPaymentBills ? "Uploading..." : "Choose files"}
+                  </button>
+                </div>
+                {payAttachments.length > 0 && (
+                  <div className="payment-bill-list">
+                    {payAttachments.map((attachment, index) => (
+                      <div className="payment-bill-file" key={`${attachment.fileUrl}-${index}`}>
+                        <span title={attachment.fileName}>{attachment.fileName}</span>
+                        <button type="button" aria-label={`Remove ${attachment.fileName}`} onClick={() => setPayAttachments(current => current.filter((_, itemIndex) => itemIndex !== index))}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button type="button" className="btn-primary" disabled={savingPayment || uploadingPaymentBills} onClick={() => void handleAddPayment()}>
                   {savingPayment ? "Processing…" : "Add Payment"}
                 </button>
               </div>
@@ -1104,8 +1357,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid var(--border-color)" }}>
-                      {["Date", "Amount", "Reference", "By"].map(h => (
-                        <th key={h} style={{ textAlign: h === "Amount" ? "right" : "left", padding: "10px 12px", color: "var(--text-secondary)", fontWeight: 500, fontSize: "0.75rem" }}>{h}</th>
+                      {["Date", "Amount", "Reference", "Bills", "By", "Actions"].map(h => (
+                        <th key={h} style={{ textAlign: h === "Amount" || h === "Actions" ? "right" : "left", padding: "10px 12px", color: "var(--text-secondary)", fontWeight: 500, fontSize: "0.75rem" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -1115,7 +1368,21 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                         <td style={{ padding: "12px" }}>{new Date(p.paidAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</td>
                         <td style={{ padding: "12px", textAlign: "right", fontWeight: 600, color: "var(--success-color)" }}>{formatMoney(p.amount)}</td>
                         <td style={{ padding: "12px", color: "var(--text-secondary)", maxWidth: "240px" }}>{p.referenceNote || "—"}</td>
+                        <td style={{ padding: "12px" }}>
+                          {p.attachments?.length ? (
+                            <div className="payment-history-bills">
+                              {p.attachments.map(attachment => (
+                                <a key={attachment.id ?? attachment.fileUrl} href={attachment.fileUrl} target="_blank" rel="noreferrer" title={attachment.fileName}>
+                                  {attachment.fileName}
+                                </a>
+                              ))}
+                            </div>
+                          ) : <span className="text-muted">None</span>}
+                        </td>
                         <td style={{ padding: "12px" }}>{p.recordedByName}</td>
+                        <td style={{ padding: "12px", textAlign: "right" }}>
+                          <button type="button" className="payment-bill-manage" onClick={() => openPaymentBillEditor(p)}>Manage bills</button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1183,10 +1450,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                       <div className="flex items-center gap-2">
                         <span style={{
                           fontSize: "0.68rem", padding: "2px 8px", borderRadius: "10px", fontWeight: 600,
-                          background: note.noteType === "CLIENT" ? "rgba(16,185,129,0.15)" : "rgba(139,92,246,0.15)",
-                          color: note.noteType === "CLIENT" ? "#6ee7b7" : "#c4b5fd",
+                          background: note.noteType === "TEAM" ? "rgba(16,185,129,0.15)" : "rgba(139,92,246,0.15)",
+                          color: note.noteType === "TEAM" ? "#6ee7b7" : "#c4b5fd",
                         }}>
-                          {note.noteType === "CLIENT" ? "CLIENT" : "INTERNAL"}
+                          {note.noteType === "TEAM" ? "PROJECT TEAM" : "ADMINS & MANAGER"}
                         </span>
                         <button onClick={() => openNoteForEdit(note)}
                           style={{ padding: "4px", background: "transparent", color: "var(--text-secondary)",
@@ -1290,12 +1557,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             <div style={{ marginBottom: "20px" }}>
               <label className="text-xs text-muted block mb-3" style={{ textTransform: "uppercase", letterSpacing: "0.05em" }}>Visibility</label>
               <div className="flex gap-6">
-                {(["INTERNAL","CLIENT"] as const).map(t => (
+                {(["ADMIN_ONLY","TEAM"] as const).map(t => (
                   <label key={t} className="flex items-center gap-2 text-sm" style={{ cursor: "pointer" }}>
                     <input type="radio" name="modalNoteVisibility" value={t}
                       checked={noteType === t} onChange={() => setNoteType(t)}
                       style={{ accentColor: "var(--primary-color)" }} />
-                    {t === "INTERNAL" ? "🔒 Internal (team only)" : "👤 Client-facing"}
+                    {t === "ADMIN_ONLY" ? "Admins and project manager only" : "Project team"}
                   </label>
                 ))}
               </div>
@@ -1375,6 +1642,67 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               <button type="button" className="btn-primary" disabled={uploadingNote || uploadingFiles || !noteText.trim()}
                 onClick={() => void handleSaveNote()}>
                 {uploadingNote ? "Saving…" : editingNoteId ? "Update Note" : "Save Note"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {editingPaymentBills && (
+        <div className="project-modal-overlay" onMouseDown={event => {
+          if (event.target === event.currentTarget && !savingEditedPaymentBills) setEditingPaymentBills(null);
+        }}>
+          <div className="glass-panel project-modal payment-bill-modal" role="dialog" aria-modal="true" aria-labelledby="payment-bill-modal-title">
+            <div className="payment-bill-modal-header">
+              <div>
+                <p className="text-xs text-muted">Payment {formatMoney(editingPaymentBills.amount)}</p>
+                <h2 id="payment-bill-modal-title">Manage bills</h2>
+              </div>
+              <button type="button" aria-label="Close" disabled={savingEditedPaymentBills} onClick={() => setEditingPaymentBills(null)}>×</button>
+            </div>
+
+            <div className="payment-bill-modal-body">
+              <p className="text-sm text-muted">Add or remove invoices, bills, and receipts. Changes apply only after you save.</p>
+              <input
+                ref={editPaymentBillInputRef}
+                type="file"
+                accept={PAYMENT_BILL_ACCEPT}
+                multiple
+                hidden
+                onChange={e => void handleEditedPaymentBillSelect(e)}
+              />
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={uploadingEditedPaymentBills || editedPaymentAttachments.length >= MAX_PAYMENT_BILLS}
+                onClick={() => editPaymentBillInputRef.current?.click()}
+              >
+                {uploadingEditedPaymentBills ? "Uploading..." : "Add bill files"}
+              </button>
+
+              {editedPaymentAttachments.length === 0 ? (
+                <div className="project-empty-state payment-bill-empty">No bills attached to this payment.</div>
+              ) : (
+                <div className="payment-bill-edit-list">
+                  {editedPaymentAttachments.map((attachment, index) => (
+                    <div className="payment-bill-edit-item" key={`${attachment.id ?? attachment.fileUrl}-${index}`}>
+                      <div>
+                        <strong>{attachment.fileName}</strong>
+                        <span>{attachment.fileType === "application/pdf" ? "PDF document" : "Image"}</span>
+                      </div>
+                      <div>
+                        <a href={attachment.fileUrl} target="_blank" rel="noreferrer">Open</a>
+                        <button type="button" onClick={() => setEditedPaymentAttachments(current => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="payment-bill-modal-actions">
+              <button type="button" className="btn-secondary" disabled={savingEditedPaymentBills} onClick={() => setEditingPaymentBills(null)}>Cancel</button>
+              <button type="button" className="btn-primary" disabled={savingEditedPaymentBills || uploadingEditedPaymentBills} onClick={() => void saveEditedPaymentBills()}>
+                {savingEditedPaymentBills ? "Saving..." : "Save bills"}
               </button>
             </div>
           </div>
