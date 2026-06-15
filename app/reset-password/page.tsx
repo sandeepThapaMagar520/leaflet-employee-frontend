@@ -3,18 +3,19 @@
 import Link from "next/link";
 import { FormEvent, Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { requestPasswordReset, setPassword, verifyPasswordOtp } from "@/lib/api";
+import { requestPasswordReset, setPassword, startAccountSetup, verifyPasswordOtp } from "@/lib/api";
 
-type Step = "email" | "otp" | "password" | "success";
+type Step = "setup" | "email" | "otp" | "password" | "success";
 
 function ResetPasswordContent() {
   const searchParams = useSearchParams();
   const setupMode = searchParams.get("mode") === "setup";
   const recoveryMode = searchParams.get("mode") === "forgot";
   const initialEmail = searchParams.get("email") ?? "";
-  const startsWithOtp = Boolean(initialEmail && (setupMode || recoveryMode));
-  const [step, setStep] = useState<Step>(startsWithOtp ? "otp" : "email");
+  const startsWithOtp = Boolean(initialEmail && recoveryMode);
+  const [step, setStep] = useState<Step>(setupMode ? "setup" : startsWithOtp ? "otp" : "email");
   const [email, setEmail] = useState(initialEmail);
+  const [temporaryPassword, setTemporaryPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [resetToken, setResetToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -24,6 +25,22 @@ function ResetPasswordContent() {
   );
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  async function handleSetup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const result = await startAccountSetup({ email, temporaryPassword });
+      setMessage(result.message);
+      setTemporaryPassword("");
+      setStep("otp");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Temporary password verification failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function handleEmail(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -92,12 +109,42 @@ function ResetPasswordContent() {
             {setupMode ? "Create your password" : "Reset your password"}
           </h1>
           <p className="text-muted" style={{ lineHeight: 1.6 }}>
+            {step === "setup" && "Enter the temporary password provided by your administrator. We will then send an email OTP."}
             {step === "email" && "Enter your work email to receive a six-digit OTP."}
             {step === "otp" && "Verify the six-digit code from your email."}
             {step === "password" && "OTP verified. Choose a new password for your account."}
             {step === "success" && "Your password is ready."}
           </p>
         </div>
+
+        {step === "setup" && (
+          <form onSubmit={handleSetup} style={{ display: "grid", gap: "16px" }}>
+            <label style={{ display: "grid", gap: "8px", fontSize: "0.9rem" }}>
+              Work email
+              <input
+                type="email"
+                value={email}
+                onChange={event => setEmail(event.target.value)}
+                placeholder="you@company.com"
+                required
+                autoComplete="email"
+              />
+            </label>
+            <label style={{ display: "grid", gap: "8px", fontSize: "0.9rem" }}>
+              Temporary one-time password
+              <input
+                type="password"
+                value={temporaryPassword}
+                onChange={event => setTemporaryPassword(event.target.value)}
+                required
+                autoComplete="current-password"
+              />
+            </label>
+            <button type="submit" className="btn-primary" disabled={loading}>
+              {loading ? "Checking..." : "Continue and send OTP"}
+            </button>
+          </form>
+        )}
 
         {step === "email" && (
           <form onSubmit={handleEmail} style={{ display: "grid", gap: "16px" }}>
@@ -148,8 +195,8 @@ function ResetPasswordContent() {
             <button type="submit" className="btn-primary" disabled={loading || otp.length !== 6}>
               {loading ? "Verifying..." : "Verify OTP"}
             </button>
-            <button type="button" className="btn-secondary" disabled={loading} onClick={() => setStep("email")}>
-              Send a new OTP
+            <button type="button" className="btn-secondary" disabled={loading} onClick={() => setStep(setupMode ? "setup" : "email")}>
+              {setupMode ? "Enter temporary password again" : "Send a new OTP"}
             </button>
           </form>
         )}
