@@ -6,7 +6,7 @@ export type Role = "ADMIN" | "MANAGER" | "EMPLOYEE";
 export type TaskStatus = "TODO" | "IN_PROGRESS" | "BLOCKED" | "DONE";
 export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type ProjectStatus = "PLANNED" | "ACTIVE" | "ON_HOLD" | "COMPLETED";
-export type ProjectNoteType = "CLIENT" | "INTERNAL";
+export type ProjectNoteType = "TEAM" | "ADMIN_ONLY";
 export type LeaveType = "ANNUAL" | "SICK" | "PERSONAL" | "UNPAID";
 export type LeaveStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
 
@@ -108,7 +108,12 @@ export type Project = {
   dueDate: string | null;
   managerId: number;
   managerName: string;
-  assignedEmployees: { id: number; fullName: string }[];
+  assignedEmployees: {
+    id: number;
+    fullName: string;
+    canManageTasks: boolean;
+    canAddNotes: boolean;
+  }[];
   clientNotes: string | null;
   internalNotes: string | null;
   documentUrl: string | null;
@@ -140,6 +145,14 @@ export type ProjectPayment = {
   paidAt: string;
   referenceNote: string | null;
   recordedByName: string;
+  attachments: PaymentAttachment[];
+};
+
+export type PaymentAttachment = {
+  id?: number;
+  fileUrl: string;
+  fileName: string;
+  fileType: string;
 };
 
 export type ProjectNote = {
@@ -497,6 +510,7 @@ export async function createProject(payload: {
   dueDate?: string;
   managerId: number;
   assignedEmployeeIds?: number[];
+  memberPermissions?: ProjectMemberPermission[];
   clientNotes?: string;
   documentUrl?: string;
   budgetAmount?: number;
@@ -545,6 +559,7 @@ export async function updateProject(projectId: number, payload: {
   dueDate?: string;
   managerId: number;
   assignedEmployeeIds?: number[];
+  memberPermissions?: ProjectMemberPermission[];
   clientNotes?: string;
   documentUrl?: string;
   budgetAmount?: number;
@@ -555,6 +570,12 @@ export async function updateProject(projectId: number, payload: {
     body: JSON.stringify(payload),
   });
 }
+
+export type ProjectMemberPermission = {
+  userId: number;
+  canManageTasks: boolean;
+  canAddNotes: boolean;
+};
 
 export async function getAllTasks() {
   return request<Task[]>("/tasks");
@@ -570,11 +591,27 @@ export async function getProjectPayments(projectId: number) {
 
 export async function createProjectPayment(
   projectId: number,
-  payload: { amount: number; paidAt: string; referenceNote?: string }
+  payload: {
+    amount: number;
+    paidAt: string;
+    referenceNote?: string;
+    attachments?: Array<Pick<PaymentAttachment, "fileUrl" | "fileName" | "fileType">>;
+  }
 ) {
   return request<ProjectPayment>(`/projects/${projectId}/payments`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function updateProjectPaymentAttachments(
+  projectId: number,
+  paymentId: number,
+  attachments: Array<Pick<PaymentAttachment, "fileUrl" | "fileName" | "fileType">>
+) {
+  return request<ProjectPayment>(`/projects/${projectId}/payments/${paymentId}/attachments`, {
+    method: "PUT",
+    body: JSON.stringify({ attachments }),
   });
 }
 
