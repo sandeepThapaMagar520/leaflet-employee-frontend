@@ -2,12 +2,52 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getAllTasks, deleteTask, getMyTasks, updateTaskStatus, Task, TaskStatus } from "@/lib/api";
+import {
+  getAllTasks,
+  deleteTask,
+  getMyTasks,
+  updateTaskStatus,
+  getProjectTaskBoards,
+  ProjectTaskBoard,
+  Task,
+  TaskPriority,
+  TaskStatus,
+} from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import ActionModal from "@/app/components/ActionModal";
 
-const taskStatusOptions: TaskStatus[] = ["TODO", "IN_PROGRESS", "BLOCKED", "DONE"];
+const defaultTaskBoards: ProjectTaskBoard[] = [
+  { id: 0, projectId: 0, statusKey: "TODO", name: "To Do", displayOrder: 10, defaultBoard: true, terminal: false },
+  { id: 0, projectId: 0, statusKey: "IN_PROGRESS", name: "In Progress", displayOrder: 20, defaultBoard: true, terminal: false },
+  { id: 0, projectId: 0, statusKey: "BLOCKED", name: "Blocked", displayOrder: 30, defaultBoard: true, terminal: false },
+  { id: 0, projectId: 0, statusKey: "DONE", name: "Done", displayOrder: 40, defaultBoard: true, terminal: true },
+];
+
+const defaultStatusOptions: TaskStatus[] = defaultTaskBoards.map(board => board.statusKey);
+const priorityOptions: Array<TaskPriority | "ALL"> = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
+
+function getBoardOptions(projectId: number, boardsByProject: Record<number, ProjectTaskBoard[]>) {
+  return boardsByProject[projectId]?.length ? boardsByProject[projectId] : defaultTaskBoards;
+}
+
+function getStatusLabel(status: string, boards?: ProjectTaskBoard[]) {
+  return boards?.find(board => board.statusKey === status)?.name ?? status.replaceAll("_", " ");
+}
+
+async function loadBoardsByProject(tasks: Task[]) {
+  const projectIds = Array.from(new Set(tasks.map(task => task.projectId)));
+  const entries = await Promise.all(
+    projectIds.map(async projectId => {
+      try {
+        return [projectId, await getProjectTaskBoards(projectId)] as const;
+      } catch {
+        return [projectId, defaultTaskBoards] as const;
+      }
+    })
+  );
+  return Object.fromEntries(entries);
+}
 
 function getStatusBadgeClass(status: string) {
   if (status === "TODO") return "badge-todo";
@@ -15,6 +55,75 @@ function getStatusBadgeClass(status: string) {
   if (status === "DONE") return "badge-done";
   if (status === "BLOCKED") return "badge-blocked";
   return "";
+}
+
+function priorityClass(priority: TaskPriority) {
+  return `task-priority task-priority-${priority.toLowerCase()}`;
+}
+
+function initials(name?: string | null) {
+  return (name || "U")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(part => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "No due date";
+  return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function isOverdue(task: Task) {
+  if (!task.dueDate || task.status === "DONE") return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return new Date(task.dueDate) < today;
+}
+
+function summary(tasks: Task[]) {
+  return {
+    total: tasks.length,
+    active: tasks.filter(task => task.status !== "DONE").length,
+    completed: tasks.filter(task => task.status === "DONE").length,
+    overdue: tasks.filter(isOverdue).length,
+  };
+}
+
+function TaskSummaryStrip({ tasks }: { tasks: Task[] }) {
+  const stats = summary(tasks);
+  return (
+    <div className="task-summary-strip">
+      <div>
+        <span>Total</span>
+        <strong>{stats.total}</strong>
+      </div>
+      <div>
+        <span>Active</span>
+        <strong>{stats.active}</strong>
+      </div>
+      <div>
+        <span>Overdue</span>
+        <strong>{stats.overdue}</strong>
+      </div>
+      <div>
+        <span>Completed</span>
+        <strong>{stats.completed}</strong>
+      </div>
+    </div>
+  );
+}
+
+function EmptyTasks({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="task-empty-state">
+      <div className="task-empty-mark">0</div>
+      <h3>{title}</h3>
+      <p>{body}</p>
+    </div>
+  );
 }
 
 function EmployeeTasksPage() {
@@ -25,11 +134,14 @@ function EmployeeTasksPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [boardsByProject, setBoardsByProject] = useState<Record<number, ProjectTaskBoard[]>>({});
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      setTasks(await getMyTasks());
+      const loadedTasks = await getMyTasks();
+      setTasks(loadedTasks);
+      setBoardsByProject(await loadBoardsByProject(loadedTasks));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to load tasks");
     } finally {
@@ -51,89 +163,94 @@ function EmployeeTasksPage() {
     }
   }
 
-  if (authLoading || loading) return <div className="p-8">Loading tasks…</div>;
+  if (authLoading || loading) return <div className="p-8">Loading tasks...</div>;
 
   const filteredTasks = tasks.filter(task => {
+    const query = searchQuery.toLowerCase();
     const matchesSearch =
-      task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      task.projectName?.toLowerCase().includes(searchQuery.toLowerCase());
+      task.title.toLowerCase().includes(query) ||
+      task.projectName?.toLowerCase().includes(query);
     const matchesStatus = statusFilter === "ALL" || task.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
+  const allBoards = Object.values(boardsByProject).flat();
+  const filterOptions = Array.from(new Set([
+    ...defaultStatusOptions,
+    ...allBoards.map(board => board.statusKey),
+    ...tasks.map(task => task.status),
+  ]));
 
   return (
-    <div>
-      <div className="mb-8">
-        <h1 className="text-gradient" style={{ fontSize: "2.2rem", marginBottom: "8px" }}>My Tasks</h1>
-        <p className="text-muted">All tasks assigned to you across projects.</p>
+    <div className="task-page">
+      <div className="task-page-header">
+        <div>
+          <p className="task-eyebrow">Personal workload</p>
+          <h1>My Tasks</h1>
+          <p>Review your assigned work, jump back into projects, and update progress without hunting through boards.</p>
+        </div>
       </div>
 
-      <div className="glass-card mb-6" style={{ padding: "16px" }}>
-        <div className="flex gap-4 items-center flex-wrap">
+      <TaskSummaryStrip tasks={tasks} />
+
+      <div className="task-filter-bar">
+        <div className="task-search-field">
+          <span>Search</span>
           <input
             type="text"
-            placeholder="Search by title or project…"
+            placeholder="Task title or project"
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            style={{ flex: 1, minWidth: "220px" }}
+            onChange={event => setSearchQuery(event.target.value)}
           />
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ minWidth: "140px" }}>
-            <option value="ALL">All Status</option>
-            {taskStatusOptions.map(s => (
-              <option key={s} value={s}>{s.replace("_", " ")}</option>
+        </div>
+        <label>
+          <span>Status</span>
+          <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+            <option value="ALL">All statuses</option>
+            {filterOptions.map(status => (
+              <option key={status} value={status}>{getStatusLabel(status, allBoards)}</option>
             ))}
           </select>
-        </div>
+        </label>
       </div>
 
       {filteredTasks.length === 0 ? (
-        <div className="glass-card" style={{ textAlign: "center", padding: "64px", color: "var(--text-secondary)" }}>
-          <div style={{ fontSize: "2.5rem", marginBottom: "12px" }}>✅</div>
-          <h3 style={{ marginBottom: "8px" }}>No tasks assigned</h3>
-          <p className="text-sm text-muted">Tasks assigned to you will appear here.</p>
-        </div>
+        <EmptyTasks title="No tasks found" body="Try changing the search or status filter." />
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(340px,1fr))", gap: "16px" }}>
-          {filteredTasks.map(task => (
-            <div key={task.id} className="glass-card" style={{ padding: "20px" }}>
-              <div className="flex justify-between items-start mb-3">
-                <h3 style={{ fontSize: "1.05rem", fontWeight: 600 }}>{task.title}</h3>
-                <span className="badge" style={{ background: "rgba(139,92,246,0.15)", color: "#c4b5fd", fontSize: "0.7rem" }}>
-                  {task.priority}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => router.push(`/projects/${task.projectId}`)}
-                className="text-sm"
-                style={{ color: "var(--primary-color)", background: "none", border: "none", padding: 0, cursor: "pointer", marginBottom: "12px" }}
-              >
-                📁 {task.projectName}
-              </button>
-              {task.description && (
-                <p className="text-sm text-muted mb-4" style={{ lineHeight: 1.5 }}>{task.description}</p>
-              )}
-              {task.dueDate && (
-                <p className="text-xs text-muted mb-4">
-                  Due: {new Date(task.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-                </p>
-              )}
-              <div className="flex items-center gap-2">
-                <span className={`badge ${getStatusBadgeClass(task.status)}`} style={{ fontSize: "0.7rem" }}>
-                  {task.status.replace("_", " ")}
-                </span>
-                <select
-                  value={task.status}
-                  onChange={e => void handleStatusChange(task.id, e.target.value as TaskStatus)}
-                  style={{ padding: "6px 10px", fontSize: "0.85rem", flex: 1 }}
+        <div className="employee-task-grid">
+          {filteredTasks.map(task => {
+            const boards = getBoardOptions(task.projectId, boardsByProject);
+            return (
+              <article key={task.id} className={`task-work-card ${isOverdue(task) ? "is-overdue" : ""}`}>
+                <div className="task-card-top">
+                  <span className={priorityClass(task.priority)}>{task.priority}</span>
+                  <span className={`badge ${getStatusBadgeClass(task.status)}`}>
+                    {getStatusLabel(task.status, boards)}
+                  </span>
+                </div>
+                <h2>{task.title}</h2>
+                {task.description && <p className="task-description">{task.description}</p>}
+                <button
+                  type="button"
+                  className="task-project-link"
+                  onClick={() => router.push(`/projects/${task.projectId}`)}
                 >
-                  {taskStatusOptions.map(s => (
-                    <option key={s} value={s}>{s.replace("_", " ")}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          ))}
+                  {task.projectName}
+                </button>
+                <div className="task-card-meta">
+                  <span className={isOverdue(task) ? "task-due overdue" : "task-due"}>{formatDate(task.dueDate)}</span>
+                  <select
+                    value={task.status}
+                    onChange={event => void handleStatusChange(task.id, event.target.value as TaskStatus)}
+                    aria-label={`Update ${task.title} status`}
+                  >
+                    {boards.map(board => (
+                      <option key={board.statusKey} value={board.statusKey}>{board.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </article>
+            );
+          })}
         </div>
       )}
     </div>
@@ -148,7 +265,7 @@ function AdminTasksPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
-  const [priorityFilter, setPriorityFilter] = useState("ALL");
+  const [priorityFilter, setPriorityFilter] = useState<Array<TaskPriority | "ALL">[number]>("ALL");
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -185,96 +302,118 @@ function AdminTasksPage() {
   }
 
   const filteredTasks = tasks.filter(task => {
+    const query = searchQuery.toLowerCase();
     const matchesSearch =
-      task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      task.projectName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      task.assignedToName?.toLowerCase().includes(searchQuery.toLowerCase());
+      task.title.toLowerCase().includes(query) ||
+      task.projectName?.toLowerCase().includes(query) ||
+      task.assignedToName?.toLowerCase().includes(query);
     const matchesStatus = statusFilter === "ALL" || task.status === statusFilter;
     const matchesPriority = priorityFilter === "ALL" || task.priority === priorityFilter;
     return matchesSearch && matchesStatus && matchesPriority;
   });
+  const adminFilterOptions = Array.from(new Set([...defaultStatusOptions, ...tasks.map(task => task.status)]));
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center" style={{ minHeight: "400px" }}>
+      <div className="task-loading-state">
         <div className="animate-pulse text-muted">Loading tasks...</div>
       </div>
     );
   }
 
   return (
-    <div>
-      <div className="flex justify-between items-end mb-8">
+    <div className="task-page">
+      <div className="task-page-header">
         <div>
-          <h1 className="text-gradient" style={{ fontSize: "2.2rem", marginBottom: "8px" }}>Task Management</h1>
-          <p className="text-muted">Monitor and distribute workload across the entire team.</p>
+          <p className="task-eyebrow">Team operations</p>
+          <h1>Task Management</h1>
+          <p>Scan ownership, priority, and risk across active project work.</p>
         </div>
-        <button onClick={() => router.push("/tasks/new")} className="btn-primary">Add New Task</button>
+        <button onClick={() => router.push("/tasks/new")} className="btn-primary">New Task</button>
       </div>
 
-      <div className="glass-card mb-6" style={{ padding: "16px" }}>
-        <div className="flex gap-4 items-center flex-wrap">
+      <TaskSummaryStrip tasks={tasks} />
+
+      <div className="task-filter-bar">
+        <div className="task-search-field">
+          <span>Search</span>
           <input
             type="text"
-            placeholder="Search by title, project, or assignee..."
+            placeholder="Title, project, or assignee"
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            style={{ flex: 1, minWidth: "250px" }}
+            onChange={event => setSearchQuery(event.target.value)}
           />
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-            <option value="ALL">All Status</option>
-            <option value="TODO">To Do</option>
-            <option value="IN_PROGRESS">In Progress</option>
-            <option value="BLOCKED">Blocked</option>
-            <option value="DONE">Done</option>
-          </select>
-          <select value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)}>
-            <option value="ALL">All Priority</option>
-            <option value="LOW">Low</option>
-            <option value="MEDIUM">Medium</option>
-            <option value="HIGH">High</option>
-            <option value="CRITICAL">Critical</option>
-          </select>
         </div>
+        <label>
+          <span>Status</span>
+          <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+            <option value="ALL">All statuses</option>
+            {adminFilterOptions.map(status => (
+              <option key={status} value={status}>{getStatusLabel(status, defaultTaskBoards)}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Priority</span>
+          <select value={priorityFilter} onChange={event => setPriorityFilter(event.target.value as typeof priorityFilter)}>
+            {priorityOptions.map(priority => (
+              <option key={priority} value={priority}>{priority === "ALL" ? "All priorities" : priority}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
-      <div className="glass-card" style={{ overflowX: "auto", padding: "0" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
-          <thead>
-            <tr style={{ borderBottom: "1px solid var(--border-color)", background: "rgba(255,255,255,0.02)" }}>
-              <th style={{ padding: "16px" }}>TASK</th>
-              <th style={{ padding: "16px" }}>PROJECT</th>
-              <th style={{ padding: "16px" }}>ASSIGNEE</th>
-              <th style={{ padding: "16px" }}>PRIORITY</th>
-              <th style={{ padding: "16px" }}>STATUS</th>
-              <th style={{ padding: "16px", textAlign: "right" }}>ACTIONS</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredTasks.map(task => (
-              <tr key={task.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                <td style={{ padding: "16px", fontWeight: 600 }}>{task.title}</td>
-                <td style={{ padding: "16px" }}>{task.projectName}</td>
-                <td style={{ padding: "16px" }}>{task.assignedToName}</td>
-                <td style={{ padding: "16px" }}>{task.priority}</td>
-                <td style={{ padding: "16px" }}>
-                  <span className={`badge ${getStatusBadgeClass(task.status)}`}>{task.status}</span>
-                </td>
-                <td style={{ padding: "16px", textAlign: "right" }}>
-                  <button onClick={() => setDeleteTarget(task)} className="btn-secondary" style={{ color: "var(--danger-color)" }}>
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {filteredTasks.length === 0 && (
+      <div className="task-table-shell">
+        <div className="task-table-header">
+          <span>{filteredTasks.length} task{filteredTasks.length !== 1 ? "s" : ""}</span>
+          <span>{summary(filteredTasks).overdue} overdue</span>
+        </div>
+        {filteredTasks.length === 0 ? (
+          <EmptyTasks title="No matching tasks" body="Clear a filter or search for another project, assignee, or task title." />
+        ) : (
+          <table className="task-table">
+            <thead>
               <tr>
-                <td colSpan={6} style={{ padding: "64px", textAlign: "center" }}>No tasks found</td>
+                <th>Task</th>
+                <th>Project</th>
+                <th>Owner</th>
+                <th>Due</th>
+                <th>Priority</th>
+                <th>Status</th>
+                <th><span className="sr-only">Actions</span></th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filteredTasks.map(task => (
+                <tr key={task.id}>
+                  <td>
+                    <strong>{task.title}</strong>
+                    {task.description && <small>{task.description}</small>}
+                  </td>
+                  <td>
+                    <button type="button" onClick={() => router.push(`/projects/${task.projectId}`)}>
+                      {task.projectName}
+                    </button>
+                  </td>
+                  <td>
+                    <div className="task-owner">
+                      <span>{initials(task.assignedToName)}</span>
+                      <strong>{task.assignedToName}</strong>
+                    </div>
+                  </td>
+                  <td><span className={isOverdue(task) ? "task-due overdue" : "task-due"}>{formatDate(task.dueDate)}</span></td>
+                  <td><span className={priorityClass(task.priority)}>{task.priority}</span></td>
+                  <td><span className={`badge ${getStatusBadgeClass(task.status)}`}>{getStatusLabel(task.status, defaultTaskBoards)}</span></td>
+                  <td>
+                    <button onClick={() => setDeleteTarget(task)} className="task-row-delete">Delete</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
+
       <ActionModal
         open={deleteTarget !== null}
         title="Delete Task"

@@ -3,7 +3,7 @@ import { handleUnauthorized } from "./auth";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080/api/v1";
 
 export type Role = "ADMIN" | "MANAGER" | "EMPLOYEE";
-export type TaskStatus = "TODO" | "IN_PROGRESS" | "BLOCKED" | "DONE";
+export type TaskStatus = string;
 export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type ProjectStatus = "PLANNED" | "ACTIVE" | "ON_HOLD" | "COMPLETED";
 export type ProjectNoteType = "TEAM" | "ADMIN_ONLY";
@@ -137,6 +137,16 @@ export type ProjectMilestone = {
   completed: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ProjectTaskBoard = {
+  id: number;
+  projectId: number;
+  statusKey: TaskStatus;
+  name: string;
+  displayOrder: number;
+  defaultBoard: boolean;
+  terminal: boolean;
 };
 
 export type ProjectPayment = {
@@ -547,6 +557,24 @@ export async function updateTaskStatus(taskId: number, status: TaskStatus) {
   });
 }
 
+export async function getProjectTaskBoards(projectId: number) {
+  return request<ProjectTaskBoard[]>(`/projects/${projectId}/task-boards`);
+}
+
+export async function createProjectTaskBoard(projectId: number, name: string) {
+  return request<ProjectTaskBoard>(`/projects/${projectId}/task-boards`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function reorderProjectTaskBoards(projectId: number, boardIds: number[]) {
+  return request<ProjectTaskBoard[]>(`/projects/${projectId}/task-boards/order`, {
+    method: "PUT",
+    body: JSON.stringify({ boardIds }),
+  });
+}
+
 export async function deleteProject(projectId: number): Promise<void> {
   await request<void>(`/projects/${projectId}`, { method: "DELETE" });
 }
@@ -639,7 +667,7 @@ export async function getTaskComments(taskId: number) {
 
 export async function createTaskComment(
   taskId: number,
-  payload: { content: string; attachmentUrl?: string; attachmentName?: string }
+  payload: { content: string; attachmentUrl?: string; attachmentName?: string; mentionedUserIds?: number[] }
 ) {
   return request<TaskComment>(`/tasks/${taskId}/comments`, {
     method: "POST",

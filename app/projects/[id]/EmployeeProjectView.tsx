@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getProject, Project, Task, getTasksByProject, getMyTasks,
@@ -8,12 +8,13 @@ import {
   getTaskComments, createTaskComment, TaskComment, uploadToCloudinary,
   getProjectMilestones, ProjectMilestone,
   getProjectNotes, createProjectNote, ProjectNote,
+  getProjectTaskBoards, ProjectTaskBoard,
 } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import ProjectKanban from "@/app/components/ProjectKanban";
+import MentionTextarea, { MentionCandidate, mentionedUserIdsFromText } from "@/app/components/MentionTextarea";
 
-const taskStatusOptions: TaskStatus[] = ["TODO", "IN_PROGRESS", "BLOCKED", "DONE"];
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const NOTE_CATEGORIES = ["GENERAL", "INITIAL_MEETING", "REQUIREMENT_GATHERING", "CHANGES", "FINDING"] as const;
 type NoteCategory = typeof NOTE_CATEGORIES[number];
@@ -33,6 +34,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
   const [myTasks, setMyTasks] = useState<Task[]>([]);
   const [milestones, setMilestones] = useState<ProjectMilestone[]>([]);
   const [projectNotes, setProjectNotes] = useState<ProjectNote[]>([]);
+  const [taskBoards, setTaskBoards] = useState<ProjectTaskBoard[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -73,12 +75,13 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
     setLoading(true);
     setFeedback("");
     try {
-      const [proj, tasks, assigned, notes, milestoneList] = await Promise.all([
+      const [proj, tasks, assigned, notes, milestoneList, boards] = await Promise.all([
         getProject(projectId),
         getTasksByProject(projectId),
         getMyTasks(),
         getProjectNotes(projectId),
         getProjectMilestones(projectId),
+        getProjectTaskBoards(projectId),
       ]);
       const isAssigned = proj.assignedEmployees?.some(e => e.id === user?.userId);
       if (!isAssigned) {
@@ -92,6 +95,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
       setMyTasks(assigned.filter(t => t.projectId === projectId));
       setProjectNotes(notes);
       setMilestones(milestoneList);
+      setTaskBoards(boards);
     } catch (err) {
       setFeedbackKind("error");
       setFeedback(err instanceof Error ? err.message : "Failed to load project");
@@ -316,6 +320,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
         content: commentText.trim(),
         attachmentUrl: commentAttachment?.url,
         attachmentName: commentAttachment?.name,
+        mentionedUserIds: mentionedUserIdsFromText(commentText, mentionCandidates),
       });
       setCommentText("");
       setCommentAttachment(null);
@@ -329,6 +334,16 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
       setSavingComment(false);
     }
   }
+
+  const mentionCandidates = useMemo<MentionCandidate[]>(() => {
+    if (!project) return [];
+    const team = [
+      { id: project.managerId, fullName: project.managerName },
+      ...(project.assignedEmployees ?? []).map(employee => ({ id: employee.id, fullName: employee.fullName })),
+    ];
+    return Array.from(new Map(team.map(member => [member.id, member])).values())
+      .filter(member => member.id !== user?.userId);
+  }, [project, user?.userId]);
 
   if (authLoading || loading) return <div className="p-8">Loading project…</div>;
 
@@ -345,6 +360,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
   const canManageTasks = myMembership?.canManageTasks ?? false;
   const canAddNotes = myMembership?.canAddNotes ?? false;
   const activeTaskCount = projectTasks.filter(task => task.status !== "DONE").length;
+  const boardNameByStatus = Object.fromEntries(taskBoards.map(board => [board.statusKey, board.name]));
   const taskAssignees = [
     { id: project.managerId, fullName: project.managerName },
     ...project.assignedEmployees,
@@ -512,6 +528,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
         </div>
         <ProjectKanban
           tasks={projectTasks}
+          boards={taskBoards}
           readOnly={!canManageTasks}
           loading={loadingTasks}
           onTaskDrop={(taskId, status) => void handleStatusChange(taskId, status)}
@@ -572,17 +589,17 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
               {selectedTask ? selectedTask.title : "Select a task card to view comments and attachments."}
             </p>
           </div>
-          {selectedTask && <span className="badge badge-in-progress">{selectedTask.status.replace("_", " ")}</span>}
+          {selectedTask && <span className="badge badge-in-progress">{boardNameByStatus[selectedTask.status] ?? selectedTask.status.replace("_", " ")}</span>}
         </div>
         {selectedTask && (
           <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 360px) minmax(0, 1fr)", gap: "18px" }}>
             <div style={{ display: "grid", gap: "12px" }}>
-              <textarea
+              <MentionTextarea
                 value={commentText}
-                onChange={e => setCommentText(e.target.value)}
+                onChange={setCommentText}
+                candidates={mentionCandidates}
                 rows={4}
-                placeholder="Add a task comment..."
-                style={{ width: "100%" }}
+                placeholder="Add a task comment... use @ to mention someone"
               />
               <input
                 ref={commentFileInputRef}
@@ -667,8 +684,8 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
                     onChange={e => void handleStatusChange(task.id, e.target.value as TaskStatus)}
                     style={{ padding: "6px 10px", fontSize: "0.85rem", flex: 1 }}
                   >
-                    {taskStatusOptions.map(s => (
-                      <option key={s} value={s}>{s.replace("_", " ")}</option>
+                    {taskBoards.map(board => (
+                      <option key={board.statusKey} value={board.statusKey}>{board.name}</option>
                     ))}
                   </select>
                 </div>

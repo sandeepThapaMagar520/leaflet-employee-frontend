@@ -1,11 +1,16 @@
 "use client";
 
 import { useRef } from "react";
-import { Task, TaskStatus } from "@/lib/api";
+import { ProjectTaskBoard, Task, TaskStatus } from "@/lib/api";
 
-const COLUMNS: TaskStatus[] = ["TODO", "IN_PROGRESS", "BLOCKED", "DONE"];
+const DEFAULT_BOARDS: ProjectTaskBoard[] = [
+  { id: 0, projectId: 0, statusKey: "TODO", name: "To Do", displayOrder: 10, defaultBoard: true, terminal: false },
+  { id: 0, projectId: 0, statusKey: "IN_PROGRESS", name: "In Progress", displayOrder: 20, defaultBoard: true, terminal: false },
+  { id: 0, projectId: 0, statusKey: "BLOCKED", name: "Blocked", displayOrder: 30, defaultBoard: true, terminal: false },
+  { id: 0, projectId: 0, statusKey: "DONE", name: "Done", displayOrder: 40, defaultBoard: true, terminal: true },
+];
 
-const STATUS_DOT: Record<TaskStatus, string> = {
+const STATUS_DOT: Record<string, string> = {
   TODO: "var(--text-secondary)",
   IN_PROGRESS: "var(--primary-color)",
   BLOCKED: "var(--danger-color)",
@@ -14,6 +19,7 @@ const STATUS_DOT: Record<TaskStatus, string> = {
 
 type ProjectKanbanProps = {
   tasks: Task[];
+  boards?: ProjectTaskBoard[];
   readOnly?: boolean;
   onTaskDrop?: (taskId: number, status: TaskStatus) => void;
   onTaskSelect?: (task: Task) => void;
@@ -21,8 +27,9 @@ type ProjectKanbanProps = {
   loading?: boolean;
 };
 
-export default function ProjectKanban({ tasks, readOnly = false, onTaskDrop, onTaskSelect, selectedTaskId, loading }: ProjectKanbanProps) {
+export default function ProjectKanban({ tasks, boards = DEFAULT_BOARDS, readOnly = false, onTaskDrop, onTaskSelect, selectedTaskId, loading }: ProjectKanbanProps) {
   const draggedTaskIdRef = useRef<number | null>(null);
+  const visibleBoards = boards.length > 0 ? boards : DEFAULT_BOARDS;
 
   if (loading) {
     return (
@@ -33,8 +40,11 @@ export default function ProjectKanban({ tasks, readOnly = false, onTaskDrop, onT
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "20px", minHeight: "450px" }}>
-      {COLUMNS.map(status => (
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(Math.max(visibleBoards.length, 1), 5)}, minmax(240px, 1fr))`, gap: "20px", minHeight: "450px", overflowX: "auto", paddingBottom: "6px" }}>
+      {visibleBoards.map(board => {
+        const status = board.statusKey;
+        const boardTasks = tasks.filter(t => t.status === status);
+        return (
         <div
           key={status}
           onDragOver={readOnly ? undefined : e => e.preventDefault()}
@@ -76,7 +86,7 @@ export default function ProjectKanban({ tasks, readOnly = false, onTaskDrop, onT
                   background: STATUS_DOT[status],
                 }}
               />
-              {status.replace("_", " ")}
+              {board.name}
             </span>
             <span
               style={{
@@ -86,12 +96,11 @@ export default function ProjectKanban({ tasks, readOnly = false, onTaskDrop, onT
                 fontSize: "0.7rem",
               }}
             >
-              {tasks.filter(t => t.status === status).length}
+              {boardTasks.length}
             </span>
           </h4>
           <div style={{ display: "flex", flexDirection: "column", gap: "12px", flex: 1 }}>
-            {tasks
-              .filter(t => t.status === status)
+            {boardTasks
               .map(task => (
                 <div
                   key={task.id}
@@ -147,7 +156,7 @@ export default function ProjectKanban({ tasks, readOnly = false, onTaskDrop, onT
                   </div>
                 </div>
               ))}
-            {tasks.filter(t => t.status === status).length === 0 && (
+            {boardTasks.length === 0 && (
               <div
                 style={{
                   flex: 1,
@@ -165,7 +174,8 @@ export default function ProjectKanban({ tasks, readOnly = false, onTaskDrop, onT
             )}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

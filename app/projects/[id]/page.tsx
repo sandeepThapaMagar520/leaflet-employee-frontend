@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, use } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import {
   getProject, Project, Task, getTasksByProject,
@@ -12,12 +12,14 @@ import {
   getTaskComments, createTaskComment, TaskComment,
   getProjectMilestones, createProjectMilestone, completeProjectMilestone, reopenProjectMilestone, deleteProjectMilestone, ProjectMilestone,
   getUsers, User, ProjectMemberPermission,
+  getProjectTaskBoards, createProjectTaskBoard, reorderProjectTaskBoards, ProjectTaskBoard,
 } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import ActionModal from "@/app/components/ActionModal";
 import EmployeeProjectView from "./EmployeeProjectView";
 import ProjectKanban from "@/app/components/ProjectKanban";
+import MentionTextarea, { MentionCandidate, mentionedUserIdsFromText } from "@/app/components/MentionTextarea";
 
 const TABS = [
   { id: "OVERVIEW" as const, label: "Overview" },
@@ -228,6 +230,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [projectNotes,    setProjectNotes]    = useState<ProjectNote[]>([]);
   const [taskComments,    setTaskComments]    = useState<TaskComment[]>([]);
   const [milestones,      setMilestones]      = useState<ProjectMilestone[]>([]);
+  const [taskBoards,      setTaskBoards]      = useState<ProjectTaskBoard[]>([]);
   const [loadingTasks,    setLoadingTasks]    = useState(false);
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [loadingNotes,    setLoadingNotes]    = useState(false);
@@ -299,7 +302,19 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [deleteNoteTargetId, setDeleteNoteTargetId] = useState<number | null>(null);
   const [deleteMilestoneTarget, setDeleteMilestoneTarget] = useState<ProjectMilestone | null>(null);
   const [deleteModalWorking, setDeleteModalWorking] = useState(false);
+  const [newBoardName, setNewBoardName] = useState("");
+  const [savingBoard, setSavingBoard] = useState(false);
+  const [draggingBoardId, setDraggingBoardId] = useState<number | null>(null);
+  const [boardDropTargetId, setBoardDropTargetId] = useState<number | null>(null);
+  const [savingBoardOrder, setSavingBoardOrder] = useState(false);
   const commentFileInputRef = useRef<HTMLInputElement>(null);
+  const draggedBoardIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!feedback) return;
+    if (feedbackKind === "success") toast.success(feedback);
+    else toast.error(feedback);
+  }, [feedback, feedbackKind, toast]);
 
   useEffect(() => {
     if (!feedback) return;
@@ -340,12 +355,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       setSavedTeamSnapshot(teamSnapshot(data.managerId, data.assignedEmployees?.map(e => e.id) ?? [], loadedPermissions));
       setPayWhen(nowDatetimeLocal());
       setLoadingTasks(true); setLoadingPayments(true); setLoadingNotes(true);
-      const [tasks, pays, notes, users, milestoneList] = await Promise.all([
+      const [tasks, pays, notes, users, milestoneList, boards] = await Promise.all([
         getTasksByProject(projectId),
         getProjectPayments(projectId),
         getProjectNotes(projectId),
         getUsers(),
         getProjectMilestones(projectId),
+        getProjectTaskBoards(projectId),
       ]);
       setProjectTasks(tasks); setProjectPayments(pays); setProjectNotes(notes);
       const domainProfile = detailProfileFromNotes(notes, "DOMAIN_DETAILS");
@@ -359,6 +375,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       setEditServerDetails(serverProfile?.title || "");
       setEditServerStartDate(serverProfile?.date || "");
       setMilestones(milestoneList);
+      setTaskBoards(boards);
       setManagers(users.filter(u => u.role === "ADMIN" || u.role === "MANAGER"));
       setEmployees(users.filter(u => u.role === "EMPLOYEE"));
     } catch (err) {
@@ -372,6 +389,16 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   useEffect(() => {
     if (!authLoading && user?.role !== "EMPLOYEE" && !Number.isNaN(projectId)) void loadData();
   }, [authLoading, loadData, projectId, user?.role]);
+
+  const mentionCandidates = useMemo<MentionCandidate[]>(() => {
+    if (!project) return [];
+    const team = [
+      { id: project.managerId, fullName: project.managerName },
+      ...(project.assignedEmployees ?? []).map(employee => ({ id: employee.id, fullName: employee.fullName })),
+    ];
+    return Array.from(new Map(team.map(member => [member.id, member])).values())
+      .filter(member => member.id !== user?.userId);
+  }, [project, user?.userId]);
 
   if (authLoading) return <div className="p-8">Loading project details...</div>;
   if (user?.role === "EMPLOYEE") return <EmployeeProjectView projectId={projectId} />;
@@ -821,6 +848,72 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  async function handleCreateTaskBoard(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = newBoardName.trim();
+    if (!name) {
+      setFeedbackKind("error");
+      setFeedback("Board name is required.");
+      return;
+    }
+    setSavingBoard(true);
+    try {
+      const board = await createProjectTaskBoard(projectId, name);
+      setTaskBoards(prev => [...prev, board].sort((a, b) => a.displayOrder - b.displayOrder || a.id - b.id));
+      setNewBoardName("");
+      setFeedbackKind("success");
+      setFeedback(`Board "${board.name}" created.`);
+    } catch (err) {
+      setFeedbackKind("error");
+      setFeedback(err instanceof Error ? err.message : "Failed to create board.");
+    } finally {
+      setSavingBoard(false);
+    }
+  }
+
+  function handleBoardDragStart(boardId: number) {
+    draggedBoardIdRef.current = boardId;
+    setDraggingBoardId(boardId);
+  }
+
+  async function handleBoardDrop(event: React.DragEvent<HTMLDivElement>, targetBoardId: number) {
+    event.preventDefault();
+    const draggedBoardId = draggedBoardIdRef.current;
+    setBoardDropTargetId(null);
+    if (!draggedBoardId || draggedBoardId === targetBoardId || savingBoardOrder) return;
+
+    const currentIndex = taskBoards.findIndex(board => board.id === draggedBoardId);
+    const targetIndex = taskBoards.findIndex(board => board.id === targetBoardId);
+    if (currentIndex < 0 || targetIndex < 0) return;
+
+    const targetRect = event.currentTarget.getBoundingClientRect();
+    const dropAfterTarget = event.clientX > targetRect.left + targetRect.width / 2;
+    const nextBoards = [...taskBoards];
+    const [draggedBoard] = nextBoards.splice(currentIndex, 1);
+    let insertIndex = targetIndex + (dropAfterTarget ? 1 : 0);
+    if (currentIndex < insertIndex) insertIndex -= 1;
+    nextBoards.splice(insertIndex, 0, draggedBoard);
+    if (nextBoards.every((board, index) => board.id === taskBoards[index]?.id)) return;
+
+    const previousBoards = taskBoards;
+    setSavingBoardOrder(true);
+    setTaskBoards(nextBoards);
+    try {
+      const saved = await reorderProjectTaskBoards(projectId, nextBoards.map(board => board.id));
+      setTaskBoards(saved);
+      setFeedbackKind("success");
+      setFeedback("Board order updated.");
+    } catch (err) {
+      setTaskBoards(previousBoards);
+      setFeedbackKind("error");
+      setFeedback(err instanceof Error ? err.message : "Failed to update board order.");
+    } finally {
+      setSavingBoardOrder(false);
+      setDraggingBoardId(null);
+      draggedBoardIdRef.current = null;
+    }
+  }
+
   async function handleTaskSelect(task: Task) {
     setSelectedTask(task);
     setCommentText("");
@@ -865,6 +958,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         content: commentText.trim(),
         attachmentUrl: commentAttachment?.url,
         attachmentName: commentAttachment?.name,
+        mentionedUserIds: mentionedUserIdsFromText(commentText, mentionCandidates),
       });
       setCommentText("");
       setCommentAttachment(null);
@@ -1001,6 +1095,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     : publicProjectNotes.filter(n => decodeNote(n.content).category === notesFilter);
 
   const activeTaskCount = projectTasks.filter(t => t.status !== "DONE").length;
+  const boardNameByStatus = Object.fromEntries(taskBoards.map(board => [board.statusKey, board.name]));
 
   // ── render ────────────────────────────────────────────────
   return (
@@ -1360,17 +1455,78 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             <div>
               <h2>Task Board</h2>
               <p className="text-sm text-muted">
-                {user?.role === "ADMIN" ? "Audit task progress and add tasks for the team." : "Drag cards between columns to update status."}
+                Drag cards between columns to update the task board.
               </p>
             </div>
             <button onClick={() => router.push(`/tasks/new?projectId=${projectId}`)} className="btn-primary" style={{ fontSize: "0.875rem" }}>
               + New Task
             </button>
           </div>
+          {(user?.role === "ADMIN" || user?.role === "MANAGER") && (
+            <div className="project-toolbar" style={{ alignItems: "stretch", justifyContent: "space-between" }}>
+              <div style={{ minWidth: "220px" }}>
+                <strong style={{ display: "block", marginBottom: "4px" }}>Boards</strong>
+                <span className="text-sm text-muted">Add and reorder project-specific columns.</span>
+              </div>
+              <div style={{ display: "grid", gap: "12px", flex: 1 }}>
+                <form onSubmit={handleCreateTaskBoard} className="flex gap-3">
+                  <input
+                    value={newBoardName}
+                    onChange={event => setNewBoardName(event.target.value)}
+                    placeholder="Board name"
+                    maxLength={80}
+                    style={{ flex: 1 }}
+                  />
+                  <button type="submit" className="btn-secondary" disabled={savingBoard}>
+                    {savingBoard ? "Adding..." : "Add Board"}
+                  </button>
+                </form>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  {taskBoards.map(board => (
+                    <div
+                      key={board.id}
+                      draggable={!savingBoardOrder}
+                      onDragStart={() => handleBoardDragStart(board.id)}
+                      onDragOver={event => {
+                        event.preventDefault();
+                        setBoardDropTargetId(board.id);
+                      }}
+                      onDragLeave={() => setBoardDropTargetId(current => current === board.id ? null : current)}
+                      onDrop={event => void handleBoardDrop(event, board.id)}
+                      onDragEnd={() => {
+                        draggedBoardIdRef.current = null;
+                        setDraggingBoardId(null);
+                        setBoardDropTargetId(null);
+                      }}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        padding: "8px 10px",
+                        border: "1px solid var(--border-color)",
+                        borderRadius: "8px",
+                        background: boardDropTargetId === board.id
+                          ? "rgba(59, 130, 246, 0.18)"
+                          : "rgba(15, 23, 42, 0.55)",
+                        boxShadow: boardDropTargetId === board.id ? "0 0 0 1px var(--primary-color)" : "none",
+                        cursor: savingBoardOrder ? "progress" : "grab",
+                        opacity: draggingBoardId === board.id ? 0.45 : 1,
+                        userSelect: "none",
+                      }}
+                      title="Drag to reorder"
+                    >
+                      <span aria-hidden="true" style={{ color: "var(--text-secondary)", fontSize: "1rem", lineHeight: 1 }}>⋮⋮</span>
+                      <span style={{ fontSize: "0.78rem", fontWeight: 700 }}>{board.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
           <ProjectKanban
             tasks={projectTasks}
+            boards={taskBoards}
             loading={loadingTasks}
-            readOnly={user?.role === "ADMIN"}
             onTaskDrop={(taskId, status) => void handleTaskDrop(taskId, status)}
             onTaskSelect={task => void handleTaskSelect(task)}
             selectedTaskId={selectedTask?.id ?? null}
@@ -1384,18 +1540,18 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   {selectedTask ? selectedTask.title : "Select a task card to view comments and attachments."}
                 </p>
               </div>
-              {selectedTask && <span className="badge badge-in-progress">{selectedTask.status.replace("_", " ")}</span>}
+              {selectedTask && <span className="badge badge-in-progress">{boardNameByStatus[selectedTask.status] ?? selectedTask.status.replace("_", " ")}</span>}
             </div>
 
             {selectedTask && (
               <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 360px) minmax(0, 1fr)", gap: "18px" }}>
                 <div style={{ display: "grid", gap: "12px" }}>
-                  <textarea
+                  <MentionTextarea
                     value={commentText}
-                    onChange={e => setCommentText(e.target.value)}
+                    onChange={setCommentText}
+                    candidates={mentionCandidates}
                     rows={4}
-                    placeholder="Add a task comment..."
-                    style={{ width: "100%" }}
+                    placeholder="Add a task comment... use @ to mention someone"
                   />
                   <input
                     ref={commentFileInputRef}
