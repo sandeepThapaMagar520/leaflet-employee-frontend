@@ -4,9 +4,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect, Suspense } from "react";
 import { createTask, Project, getProjects, getUsers, User, TaskPriority } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 
 function NewTaskForm() {
   const router = useRouter();
+  const toast = useToast();
   const searchParams = useSearchParams();
   const initialProjectId = searchParams.get("projectId");
   
@@ -22,7 +24,6 @@ function NewTaskForm() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
   useEffect(() => {
     async function loadData() {
@@ -31,25 +32,24 @@ function NewTaskForm() {
         setProjects(projList);
         setUsers(userList);
       } catch (err) {
-        console.error("Failed to load data", err);
+        toast.error(err instanceof Error ? err.message : "Failed to load task form options");
       }
     }
     if (!authLoading) {
       loadData();
     }
-  }, [authLoading]);
+  }, [authLoading, toast]);
 
   if (authLoading) return <div className="p-8">Verifying access...</div>;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title || !projectId || !assignedToId) {
-      setError("Title, project, and assignee are required");
+      toast.error("Title, project, and assignee are required");
       return;
     }
 
     setLoading(true);
-    setError("");
     try {
       await createTask({
         title,
@@ -59,9 +59,10 @@ function NewTaskForm() {
         assignedToId: Number(assignedToId),
         dueDate: dueDate || undefined
       });
+      toast.success("Task created.");
       router.push(`/projects/${projectId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create task");
+      toast.error(err instanceof Error ? err.message : "Failed to create task");
     } finally {
       setLoading(false);
     }
@@ -86,12 +87,6 @@ function NewTaskForm() {
       </div>
 
       <form onSubmit={handleSubmit} className="glass-panel" style={{ padding: "32px" }}>
-        {error && (
-          <div style={{ background: "rgba(239, 68, 68, 0.1)", color: "var(--danger-color)", padding: "12px", borderRadius: "8px", marginBottom: "24px", fontSize: "0.9rem" }}>
-            {error}
-          </div>
-        )}
-
         <div style={{ display: "grid", gap: "24px" }}>
           <div>
             <label style={{ display: "block", marginBottom: "8px", fontWeight: 500, fontSize: "0.9rem" }}>Task Title *</label>

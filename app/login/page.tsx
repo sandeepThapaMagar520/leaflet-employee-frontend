@@ -3,26 +3,26 @@
 import { FormEvent, useState } from "react";
 import { login } from "@/lib/api";
 import { setAuthSession } from "@/lib/auth";
+import { useToast } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 export default function LoginPage() {
   const router = useRouter();
+  const toast = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      setMessage("Please enter your email address.");
+      toast.error("Please enter your email address.");
       return;
     }
     if (!password) {
-      setMessage("Please enter your password.");
+      toast.error("Please enter your password.");
       return;
     }
     setIsLoading(true);
@@ -33,12 +33,14 @@ export default function LoginPage() {
       localStorage.setItem("auth_user", JSON.stringify(result));
       setAuthSession();
       if (result.mustChangePassword) {
+        toast.info("Signed in. Please update your password to continue.");
         router.push("/profile?tab=security");
       } else {
+        toast.success(`Welcome back, ${result.fullName}.`);
         router.push("/dashboard");
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Sign in failed. Please try again.");
+      toast.error(error instanceof Error ? error.message : "Sign in failed. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -155,22 +157,6 @@ export default function LoginPage() {
             {" "}with the temporary password sent to your email.
           </p>
 
-          {message && (
-            <div
-              role="alert"
-              aria-live="polite"
-              style={{
-              marginTop: "8px",
-              padding: "12px",
-              borderRadius: "8px",
-              background: "rgba(239, 68, 68, 0.1)",
-              color: "var(--danger-color)",
-              fontSize: "0.85rem",
-              textAlign: "center"
-            }}>
-              {message}
-            </div>
-          )}
         </form>
       </div>
     </div>

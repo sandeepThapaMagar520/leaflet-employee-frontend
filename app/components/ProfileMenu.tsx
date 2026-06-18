@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clearAuthSession } from "@/lib/auth";
 import { getMyProfile, Profile, resendVerificationEmail } from "@/lib/api";
+import { useToast } from "@/lib/toast";
 
 type StoredUser = {
   fullName: string;
@@ -19,6 +20,7 @@ function initials(name: string) {
 
 export default function ProfileMenu() {
   const router = useRouter();
+  const toast = useToast();
   const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [user, setUser] = useState<StoredUser | null>(null);
@@ -85,6 +87,9 @@ export default function ProfileMenu() {
     setResending(true);
     try {
       await resendVerificationEmail();
+      toast.success("Verification email sent. Check your inbox.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to resend verification email");
     } finally {
       setResending(false);
     }

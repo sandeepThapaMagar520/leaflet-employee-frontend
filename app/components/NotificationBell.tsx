@@ -10,6 +10,7 @@ import {
   Notification,
   NotificationType,
 } from "@/lib/api";
+import { useToast } from "@/lib/toast";
 
 function notificationMeta(type: NotificationType) {
   switch (type) {
@@ -32,6 +33,7 @@ function notificationMeta(type: NotificationType) {
 
 export default function NotificationBell() {
   const router = useRouter();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -81,12 +83,17 @@ export default function NotificationBell() {
   }
 
   async function handleClick(notification: Notification) {
-    if (!notification.read) {
-      await markNotificationRead(notification.id);
-      setUnread(prev => Math.max(0, prev - 1));
-      setNotifications(prev =>
-        prev.map(n => (n.id === notification.id ? { ...n, read: true } : n))
-      );
+    try {
+      if (!notification.read) {
+        await markNotificationRead(notification.id);
+        setUnread(prev => Math.max(0, prev - 1));
+        setNotifications(prev =>
+          prev.map(n => (n.id === notification.id ? { ...n, read: true } : n))
+        );
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to mark notification as read");
+      return;
     }
     setOpen(false);
     if (notification.link) {
@@ -95,9 +102,14 @@ export default function NotificationBell() {
   }
 
   async function handleMarkAllRead() {
-    await markAllNotificationsRead();
-    setUnread(0);
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    try {
+      await markAllNotificationsRead();
+      setUnread(0);
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      toast.success("All notifications marked as read.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to mark notifications as read");
+    }
   }
 
   return (

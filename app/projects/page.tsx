@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getProjects, deleteProject, Project } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 import ActionModal from "@/app/components/ActionModal";
 
 function formatMoney(amount: number | null | undefined) {
@@ -22,10 +23,10 @@ function getStatusBadgeClass(status: string) {
 
 function EmployeeProjectsPage() {
   const router = useRouter();
+  const toast = useToast();
   const { loading: authLoading, user } = useAuth(["EMPLOYEE"]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [feedback, setFeedback] = useState("");
 
   useEffect(() => {
     if (authLoading) return;
@@ -35,12 +36,12 @@ function EmployeeProjectsPage() {
         const list = await getProjects();
         setProjects(list.filter(p => p.assignedEmployees?.some(e => e.id === user?.userId)));
       } catch (err) {
-        setFeedback(err instanceof Error ? err.message : "Failed to load projects");
+        toast.error(err instanceof Error ? err.message : "Failed to load projects");
       } finally {
         setLoading(false);
       }
     })();
-  }, [authLoading, user?.userId]);
+  }, [authLoading, toast, user?.userId]);
 
   if (authLoading || loading) return <div className="p-8">Loading projects…</div>;
 
@@ -50,12 +51,6 @@ function EmployeeProjectsPage() {
         <h1 className="text-gradient" style={{ fontSize: "2.2rem", marginBottom: "8px" }}>My Projects</h1>
         <p className="text-muted">Projects you are assigned to. Open a project to view the board and your tasks.</p>
       </div>
-
-      {feedback && (
-        <div style={{ background: "rgba(239,68,68,0.1)", color: "var(--danger-color)", padding: "12px", borderRadius: "8px", marginBottom: "24px" }}>
-          {feedback}
-        </div>
-      )}
 
       {projects.length === 0 ? (
         <div className="glass-card" style={{ textAlign: "center", padding: "64px", color: "var(--text-secondary)" }}>
@@ -99,33 +94,30 @@ function EmployeeProjectsPage() {
 
 function AdminProjectsPage() {
   const router = useRouter();
+  const toast = useToast();
   const { loading: authLoading } = useAuth(["ADMIN", "MANAGER"]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [feedback, setFeedback] = useState("");
-  const [feedbackKind, setFeedbackKind] = useState<"success" | "error">("error");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true);
-    setFeedback("");
     try {
       const list = await getProjects();
       setProjects(list);
     } catch (error) {
-      setFeedbackKind("error");
-      setFeedback(error instanceof Error ? error.message : "Failed to load projects");
+      toast.error(error instanceof Error ? error.message : "Failed to load projects");
     } finally {
       setLoading(false);
     }
-  }
+  }, [toast]);
 
   useEffect(() => {
     if (!authLoading) void loadData();
-  }, [authLoading]);
+  }, [authLoading, loadData]);
 
   if (authLoading) return <div className="p-8">Verifying access...</div>;
 
@@ -134,13 +126,11 @@ function AdminProjectsPage() {
     setDeleting(true);
     try {
       await deleteProject(deleteTarget.id);
-      setFeedbackKind("success");
-      setFeedback("Project deleted successfully");
+      toast.success("Project deleted successfully");
       setDeleteTarget(null);
       await loadData();
     } catch {
-      setFeedbackKind("error");
-      setFeedback("Failed to delete project");
+      toast.error("Failed to delete project");
     } finally {
       setDeleting(false);
     }
@@ -162,11 +152,6 @@ function AdminProjectsPage() {
       </div>
     );
   }
-
-  const feedbackStyles =
-    feedbackKind === "success"
-      ? { background: "rgba(34, 197, 94, 0.12)", color: "var(--success-color, #22c55e)" }
-      : { background: "rgba(239, 68, 68, 0.1)", color: "var(--danger-color)" };
 
   return (
     <div>
@@ -211,12 +196,6 @@ function AdminProjectsPage() {
           </div>
         </div>
       </div>
-
-      {feedback && (
-        <div style={{ ...feedbackStyles, padding: "12px", borderRadius: "8px", marginBottom: "24px" }}>
-          {feedback}
-        </div>
-      )}
 
       <div className="glass-card" style={{ overflowX: "auto", padding: "0" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>

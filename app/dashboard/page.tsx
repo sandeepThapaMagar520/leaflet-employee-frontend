@@ -18,6 +18,7 @@ import {
   User,
   AttendanceSession,
 } from "@/lib/api";
+import { useToast } from "@/lib/toast";
 
 const taskStatusOptions: TaskStatus[] = ["TODO", "IN_PROGRESS", "BLOCKED", "DONE"];
 const taskPriorityOptions: TaskPriority[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
@@ -29,12 +30,12 @@ type StoredUser = {
 };
 
 export default function DashboardPage() {
+  const toast = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [myTasks, setMyTasks] = useState<Task[]>([]);
   const [teamTasks, setTeamTasks] = useState<Task[]>([]);
   const [activeSessions, setActiveSessions] = useState<AttendanceSession[]>([]);
-  const [feedback, setFeedback] = useState("");
   const [loading, setLoading] = useState(true);
 
   const [projectName, setProjectName] = useState("");
@@ -118,7 +119,6 @@ export default function DashboardPage() {
 
   async function loadData() {
     setLoading(true);
-    setFeedback("");
     try {
       const [projectList, taskList] = await Promise.all([getProjects(), getMyTasks()]);
       setProjects(projectList);
@@ -132,7 +132,7 @@ export default function DashboardPage() {
         setTeamTasks(taskList);
       }
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Failed to load dashboard data");
+      toast.error(error instanceof Error ? error.message : "Failed to load dashboard data");
     } finally {
       setLoading(false);
     }
@@ -150,7 +150,7 @@ export default function DashboardPage() {
     if (!projectManagerId) return;
     const budgetParsed = projectBudget.trim() === "" ? undefined : parseFloat(projectBudget);
     if (budgetParsed !== undefined && Number.isNaN(budgetParsed)) {
-      setFeedback("Budget must be a valid number.");
+      toast.error("Budget must be a valid number.");
       return;
     }
     try {
@@ -172,9 +172,10 @@ export default function DashboardPage() {
       setProjectInternalNotes("");
       setProjectBudget("");
       setProjectDocumentUrl("");
+      toast.success("Project created.");
       await loadData();
     } catch (error) {
-      setFeedback("Failed to create project");
+      toast.error(error instanceof Error ? error.message : "Failed to create project");
     }
   }
 
@@ -184,18 +185,20 @@ export default function DashboardPage() {
     try {
       await createTask({ title: taskTitle, description: taskDescription, priority: taskPriority, projectId: Number(taskProjectId), assignedToId: Number(taskAssigneeId) });
       setTaskTitle(""); setTaskDescription(""); setTaskProjectId(""); setTaskAssigneeId(""); setTaskPriority("MEDIUM");
+      toast.success("Task created.");
       await loadData();
     } catch (error) {
-      setFeedback("Failed to create task");
+      toast.error(error instanceof Error ? error.message : "Failed to create task");
     }
   }
 
   async function handleStatusChange(taskId: number, status: TaskStatus) {
     try {
       await updateTaskStatus(taskId, status);
+      toast.success("Task status updated.");
       await loadData();
     } catch (error) {
-      setFeedback("Failed to update status");
+      toast.error(error instanceof Error ? error.message : "Failed to update status");
     }
   }
 
@@ -219,12 +222,6 @@ export default function DashboardPage() {
           <p className="text-muted mt-2">Welcome back, {authUser?.fullName}. Here&apos;s the latest status.</p>
         </div>
       </div>
-
-      {feedback && (
-        <div style={{ background: "rgba(239, 68, 68, 0.1)", color: "var(--danger-color)", padding: "12px", borderRadius: "8px", marginBottom: "24px" }}>
-          {feedback}
-        </div>
-      )}
 
       {/* Overview Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "20px", marginBottom: "32px" }}>

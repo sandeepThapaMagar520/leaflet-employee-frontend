@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAllTasks, deleteTask, getMyTasks, updateTaskStatus, Task, TaskStatus } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 import ActionModal from "@/app/components/ActionModal";
 
 const taskStatusOptions: TaskStatus[] = ["TODO", "IN_PROGRESS", "BLOCKED", "DONE"];
@@ -18,41 +19,35 @@ function getStatusBadgeClass(status: string) {
 
 function EmployeeTasksPage() {
   const router = useRouter();
+  const toast = useToast();
   const { loading: authLoading } = useAuth(["EMPLOYEE"]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
-  const [feedback, setFeedback] = useState("");
-  const [feedbackKind, setFeedbackKind] = useState<"success" | "error">("error");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true);
-    setFeedback("");
     try {
       setTasks(await getMyTasks());
     } catch (err) {
-      setFeedbackKind("error");
-      setFeedback(err instanceof Error ? err.message : "Failed to load tasks");
+      toast.error(err instanceof Error ? err.message : "Failed to load tasks");
     } finally {
       setLoading(false);
     }
-  }
+  }, [toast]);
 
   useEffect(() => {
     if (!authLoading) void loadData();
-  }, [authLoading]);
+  }, [authLoading, loadData]);
 
   async function handleStatusChange(taskId: number, status: TaskStatus) {
-    setFeedback("");
     try {
       await updateTaskStatus(taskId, status);
       await loadData();
-      setFeedbackKind("success");
-      setFeedback("Task status updated.");
+      toast.success("Task status updated.");
     } catch (err) {
-      setFeedbackKind("error");
-      setFeedback(err instanceof Error ? err.message : "Failed to update status");
+      toast.error(err instanceof Error ? err.message : "Failed to update status");
     }
   }
 
@@ -65,10 +60,6 @@ function EmployeeTasksPage() {
     const matchesStatus = statusFilter === "ALL" || task.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
-
-  const feedbackStyles = feedbackKind === "success"
-    ? { background: "rgba(34,197,94,0.12)", color: "var(--success-color,#22c55e)" }
-    : { background: "rgba(239,68,68,0.1)", color: "var(--danger-color)" };
 
   return (
     <div>
@@ -94,12 +85,6 @@ function EmployeeTasksPage() {
           </select>
         </div>
       </div>
-
-      {feedback && (
-        <div style={{ ...feedbackStyles, padding: "12px", borderRadius: "8px", marginBottom: "24px" }}>
-          {feedback}
-        </div>
-      )}
 
       {filteredTasks.length === 0 ? (
         <div className="glass-card" style={{ textAlign: "center", padding: "64px", color: "var(--text-secondary)" }}>
@@ -157,31 +142,30 @@ function EmployeeTasksPage() {
 
 function AdminTasksPage() {
   const router = useRouter();
+  const toast = useToast();
   const { loading: authLoading } = useAuth(["ADMIN", "MANAGER"]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
-  const [feedback, setFeedback] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [priorityFilter, setPriorityFilter] = useState("ALL");
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true);
-    setFeedback("");
     try {
       setTasks(await getAllTasks());
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Failed to load tasks");
+      toast.error(error instanceof Error ? error.message : "Failed to load tasks");
     } finally {
       setLoading(false);
     }
-  }
+  }, [toast]);
 
   useEffect(() => {
     if (!authLoading) void loadData();
-  }, [authLoading]);
+  }, [authLoading, loadData]);
 
   if (authLoading) return <div className="p-8">Verifying access...</div>;
 
@@ -190,11 +174,11 @@ function AdminTasksPage() {
     setDeleting(true);
     try {
       await deleteTask(deleteTarget.id);
-      setFeedback("Task deleted successfully");
+      toast.success("Task deleted successfully");
       setDeleteTarget(null);
       await loadData();
     } catch {
-      setFeedback("Failed to delete task");
+      toast.error("Failed to delete task");
     } finally {
       setDeleting(false);
     }
@@ -253,12 +237,6 @@ function AdminTasksPage() {
           </select>
         </div>
       </div>
-
-      {feedback && (
-        <div style={{ background: "rgba(34, 197, 94, 0.12)", color: "var(--success-color)", padding: "12px", borderRadius: "8px", marginBottom: "24px" }}>
-          {feedback}
-        </div>
-      )}
 
       <div className="glass-card" style={{ overflowX: "auto", padding: "0" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>

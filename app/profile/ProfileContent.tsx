@@ -286,6 +286,7 @@ export default function ProfileContent() {
     setRecoveringPassword(true);
     try {
       await requestPasswordReset(email);
+      toast.success("Password reset OTP sent. Check your inbox.");
       router.push(`/reset-password?email=${encodeURIComponent(email)}&mode=forgot`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to send password reset OTP");
@@ -301,6 +302,7 @@ export default function ProfileContent() {
     try {
       const saved = await updateNotificationPreferences({ [key]: value });
       setPrefs(saved);
+      toast.success("Notification preference updated.");
     } catch (error) {
       setPrefs(previous);
       toast.error(error instanceof Error ? error.message : "Failed to update preferences");

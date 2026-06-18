@@ -14,6 +14,7 @@ import {
   getUsers, User, ProjectMemberPermission,
 } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 import ActionModal from "@/app/components/ActionModal";
 import EmployeeProjectView from "./EmployeeProjectView";
 import ProjectKanban from "@/app/components/ProjectKanban";
@@ -24,6 +25,7 @@ const TABS = [
   { id: "MILESTONES" as const, label: "Milestones" },
   { id: "TASKS" as const, label: "Tasks" },
   { id: "FINANCES" as const, label: "Finances" },
+  { id: "ADDITIONAL_DETAILS" as const, label: "Additional Details" },
   { id: "NOTES" as const, label: "Notes" },
 ];
 
@@ -41,6 +43,11 @@ function toDatetimeLocalValue(iso: string | null) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 function nowDatetimeLocal() { return toDatetimeLocalValue(new Date().toISOString()); }
+function domainHref(domain: string) {
+  const trimmed = domain.trim();
+  if (!trimmed) return "";
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
 const getStatusBadgeClass = (s: string) =>
   s === "PLANNED" ? "badge-todo" : s === "ACTIVE" ? "badge-in-progress" :
   s === "COMPLETED" ? "badge-done" : s === "ON_HOLD" ? "badge-blocked" : "";
@@ -51,9 +58,40 @@ const NOTE_CATEGORIES = [
   { value: "REQUIREMENT_GATHERING", label: "Requirement Gathering", icon: "📋" },
   { value: "CHANGES",               label: "Changes",               icon: "🔄" },
   { value: "FINDING",               label: "Finding / Issue",       icon: "🔍" },
+  { value: "DOMAIN_DETAILS",        label: "Domain Details",        icon: "🌐" },
+  { value: "MAINTENANCE_DETAILS",   label: "Maintenance Details",   icon: "🧾" },
+  { value: "SERVER_DETAILS",        label: "Server Details",        icon: "🖥️" },
   { value: "GENERAL",               label: "General Note",          icon: "📝" },
 ] as const;
 type NoteCategory = typeof NOTE_CATEGORIES[number]["value"];
+type AdditionalDetailKey = "DOMAIN_DETAILS" | "MAINTENANCE_DETAILS" | "SERVER_DETAILS";
+
+const ADDITIONAL_DETAIL_SECTIONS = [
+  {
+    key: "DOMAIN_DETAILS" as const,
+    title: "Domain",
+    titleLabel: "Domain title / name",
+    dateLabel: "Purchase or start date",
+    placeholder: "example.com",
+    description: "Domain name, purchase date, payments, renewals, DNS notes, and issues.",
+  },
+  {
+    key: "MAINTENANCE_DETAILS" as const,
+    title: "AMC",
+    titleLabel: "AMC title / name",
+    dateLabel: "Start date",
+    placeholder: "Website maintenance 2026",
+    description: "Maintenance name, start date, cost, payment notes, bugs, and follow-ups.",
+  },
+  {
+    key: "SERVER_DETAILS" as const,
+    title: "Server",
+    titleLabel: "Server title / name",
+    dateLabel: "Purchase or start date",
+    placeholder: "DigitalOcean droplet / AWS EC2",
+    description: "Server name, start date, hosting payments, bugs, plan changes, and access notes.",
+  },
+] as const;
 
 type NoteAttachment = {
   url: string;
@@ -106,6 +144,9 @@ function encodeNote(data: {
   date: string;
   text: string;
   attachments: NoteAttachment[];
+  detailTitle?: string;
+  detailCost?: string;
+  isDetailProfile?: boolean;
 }): string {
   return JSON.stringify(data);
 }
@@ -115,6 +156,9 @@ function decodeNote(content: string): {
   date: string;
   text: string;
   attachments: NoteAttachment[];
+  detailTitle?: string;
+  detailCost?: string;
+  isDetailProfile?: boolean;
 } {
   try {
     const parsed = JSON.parse(content) as {
@@ -122,6 +166,9 @@ function decodeNote(content: string): {
       text?: string;
       date?: string;
       attachments?: StoredAttachment[];
+      detailTitle?: string;
+      detailCost?: string;
+      isDetailProfile?: boolean;
     };
     if (parsed.category && parsed.text !== undefined) {
       return {
@@ -129,6 +176,9 @@ function decodeNote(content: string): {
         date: parsed.date ?? "",
         text: parsed.text,
         attachments: normalizeAttachments(parsed.attachments ?? []),
+        detailTitle: parsed.detailTitle,
+        detailCost: parsed.detailCost,
+        isDetailProfile: parsed.isDetailProfile ?? false,
       };
     }
   } catch {}
@@ -139,13 +189,33 @@ function decodeNote(content: string): {
 }
 
 function categoryMeta(cat: NoteCategory) {
-  return NOTE_CATEGORIES.find(c => c.value === cat) ?? NOTE_CATEGORIES[4];
+  return NOTE_CATEGORIES.find(c => c.value === cat) ?? NOTE_CATEGORIES.find(c => c.value === "GENERAL")!;
+}
+
+function isDetailProfileNote(note: ProjectNote) {
+  return decodeNote(note.content).isDetailProfile === true;
+}
+
+function detailProfileFromNotes(notes: ProjectNote[], category: AdditionalDetailKey) {
+  const note = notes.find(item => {
+    const decoded = decodeNote(item.content);
+    return decoded.category === category && decoded.isDetailProfile;
+  });
+  if (!note) return null;
+  const decoded = decodeNote(note.content);
+  return {
+    noteId: note.id,
+    title: decoded.detailTitle ?? "",
+    date: decoded.date ?? "",
+    cost: decoded.detailCost ?? "",
+  };
 }
 
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectIdStr } = use(params);
   const projectId = parseInt(projectIdStr);
   const router = useRouter();
+  const toast = useToast();
   const { loading: authLoading, user } = useAuth(["ADMIN", "MANAGER", "EMPLOYEE"]);
 
   const [project, setProject]           = useState<Project | null>(null);
@@ -167,6 +237,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [editDocs,    setEditDocs]    = useState("");
   const [editBudget,  setEditBudget]  = useState("");
   const [editStatus,  setEditStatus]  = useState<ProjectStatus>("PLANNED");
+  const [editServerDetails, setEditServerDetails] = useState("");
+  const [editDomainName, setEditDomainName] = useState("");
+  const [editAnnualMaintenanceCost, setEditAnnualMaintenanceCost] = useState("");
+  const [editDomainStartDate, setEditDomainStartDate] = useState("");
+  const [editServerStartDate, setEditServerStartDate] = useState("");
+  const [editMaintenanceTitle, setEditMaintenanceTitle] = useState("");
+  const [editMaintenanceStartDate, setEditMaintenanceStartDate] = useState("");
+  const [savingDetailKey, setSavingDetailKey] = useState<AdditionalDetailKey | null>(null);
 
   // team assignment edits
   const [managers, setManagers] = useState<User[]>([]);
@@ -211,7 +289,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   // notes filter
   const [notesFilter, setNotesFilter] = useState<"ALL"|NoteCategory>("ALL");
 
-  const [activeTab, setActiveTab] = useState<"OVERVIEW"|"TEAM"|"MILESTONES"|"TASKS"|"FINANCES"|"NOTES">("OVERVIEW");
+  const [activeTab, setActiveTab] = useState<"OVERVIEW"|"TEAM"|"MILESTONES"|"TASKS"|"FINANCES"|"ADDITIONAL_DETAILS"|"NOTES">("OVERVIEW");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [commentText, setCommentText] = useState("");
   const [commentAttachment, setCommentAttachment] = useState<{ url: string; name: string } | null>(null);
@@ -222,6 +300,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [deleteMilestoneTarget, setDeleteMilestoneTarget] = useState<ProjectMilestone | null>(null);
   const [deleteModalWorking, setDeleteModalWorking] = useState(false);
   const commentFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!feedback) return;
+    if (feedbackKind === "success") toast.success(feedback);
+    else toast.error(feedback);
+  }, [feedback, feedbackKind, toast]);
 
   // ── Escape key closes modal ────────────────────────────────
   useEffect(() => {
@@ -241,6 +325,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       setEditDocs(data.documentUrl || "");
       setEditBudget(data.budgetAmount ? String(data.budgetAmount) : "");
       setEditStatus(data.status);
+      setEditServerDetails("");
+      setEditDomainName("");
+      setEditAnnualMaintenanceCost("");
       setEditManagerId(data.managerId);
       setEditAssignedEmployeeIds(data.assignedEmployees?.map(e => e.id) ?? []);
       const loadedPermissions = Object.fromEntries(
@@ -261,6 +348,16 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         getProjectMilestones(projectId),
       ]);
       setProjectTasks(tasks); setProjectPayments(pays); setProjectNotes(notes);
+      const domainProfile = detailProfileFromNotes(notes, "DOMAIN_DETAILS");
+      const maintenanceProfile = detailProfileFromNotes(notes, "MAINTENANCE_DETAILS");
+      const serverProfile = detailProfileFromNotes(notes, "SERVER_DETAILS");
+      setEditDomainName(domainProfile?.title || "");
+      setEditDomainStartDate(domainProfile?.date || "");
+      setEditMaintenanceTitle(maintenanceProfile?.title || "");
+      setEditMaintenanceStartDate(maintenanceProfile?.date || "");
+      setEditAnnualMaintenanceCost(maintenanceProfile?.cost || "");
+      setEditServerDetails(serverProfile?.title || "");
+      setEditServerStartDate(serverProfile?.date || "");
       setMilestones(milestoneList);
       setManagers(users.filter(u => u.role === "ADMIN" || u.role === "MANAGER"));
       setEmployees(users.filter(u => u.role === "EMPLOYEE"));
@@ -314,6 +411,86 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       setFeedbackKind("success"); setFeedback("Project updated successfully.");
     } catch { setFeedbackKind("error"); setFeedback("Failed to update project."); }
     finally { setIsSaving(false); }
+  }
+
+  function getAdditionalDetailInput(category: AdditionalDetailKey) {
+    if (category === "DOMAIN_DETAILS") {
+      return { title: editDomainName.trim(), date: editDomainStartDate };
+    }
+    if (category === "SERVER_DETAILS") {
+      return { title: editServerDetails.trim(), date: editServerStartDate };
+    }
+    return { title: editMaintenanceTitle.trim(), date: editMaintenanceStartDate };
+  }
+
+  async function saveAdditionalDetail(category: AdditionalDetailKey) {
+    if (!project) return;
+    const { title, date } = getAdditionalDetailInput(category);
+    if (!title) {
+      setFeedbackKind("error");
+      setFeedback("Please enter a title or name first.");
+      return;
+    }
+    if (!date) {
+      setFeedbackKind("error");
+      setFeedback("Please choose the purchase or start date.");
+      return;
+    }
+
+    const maintenanceCost = editAnnualMaintenanceCost.trim() === "" ? undefined : parseFloat(editAnnualMaintenanceCost);
+    if (maintenanceCost !== undefined && (Number.isNaN(maintenanceCost) || maintenanceCost < 0)) {
+      setFeedbackKind("error");
+      setFeedback("Annual maintenance cost must be a valid positive number.");
+      return;
+    }
+
+    setSavingDetailKey(category);
+    setFeedback("");
+    try {
+      const updated = await updateProject(project.id, {
+        name: project.name,
+        description: project.description || "",
+        status: editStatus,
+        managerId: editManagerId,
+        assignedEmployeeIds: editAssignedEmployeeIds,
+        memberPermissions: buildMemberPermissions(),
+        documentUrl: editDocs,
+        budgetAmount: editBudget.trim() === "" ? undefined : parseFloat(editBudget),
+      });
+
+      const existingProfile = projectNotes.find(note => {
+        const decoded = decodeNote(note.content);
+        return decoded.category === category && decoded.isDetailProfile;
+      });
+      const payload = {
+        content: encodeNote({
+          category,
+          date,
+          text: "Detail setup",
+          attachments: [],
+          detailTitle: title,
+          detailCost: category === "MAINTENANCE_DETAILS" ? editAnnualMaintenanceCost.trim() : undefined,
+          isDetailProfile: true,
+        }),
+        noteType: "ADMIN_ONLY" as ProjectNoteType,
+      };
+      if (existingProfile) {
+        await updateProjectNote(existingProfile.id, payload);
+      } else {
+        await createProjectNote(project.id, payload);
+      }
+
+      const notes = await getProjectNotes(project.id);
+      setProject(updated);
+      setProjectNotes(notes);
+      setFeedbackKind("success");
+      setFeedback("Additional detail saved.");
+    } catch (err) {
+      setFeedbackKind("error");
+      setFeedback(err instanceof Error ? err.message : "Failed to save additional detail.");
+    } finally {
+      setSavingDetailKey(null);
+    }
   }
 
   async function saveTeamAssignments() {
@@ -763,6 +940,16 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     setShowNoteModal(false);
   }
 
+  function openNewNote(category: NoteCategory = "GENERAL") {
+    setNoteText("");
+    setNoteDate(new Date().toISOString().split("T")[0]);
+    setNoteCategory(category);
+    setNoteType("ADMIN_ONLY");
+    setAttachments([]);
+    setEditingNoteId(null);
+    setShowNoteModal(true);
+  }
+
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
@@ -806,14 +993,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
-  const feedbackStyles = feedbackKind === "success"
-    ? { background: "rgba(34,197,94,0.12)", color: "var(--success-color,#22c55e)" }
-    : { background: "rgba(239,68,68,0.1)", color: "var(--danger-color)" };
+  const publicProjectNotes = projectNotes.filter(note => !isDetailProfileNote(note));
 
   // filtered notes for the notes tab
   const visibleNotes = notesFilter === "ALL"
-    ? projectNotes
-    : projectNotes.filter(n => decodeNote(n.content).category === notesFilter);
+    ? publicProjectNotes
+    : publicProjectNotes.filter(n => decodeNote(n.content).category === notesFilter);
 
   const activeTaskCount = projectTasks.filter(t => t.status !== "DONE").length;
 
@@ -825,10 +1010,6 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         <span>/</span>
         <span style={{ color: "var(--text-primary)" }}>{project.name}</span>
       </nav>
-
-      {feedback && (
-        <div className="project-feedback" style={feedbackStyles}>{feedback}</div>
-      )}
 
       {/* Hero */}
       <div className="glass-panel project-hero">
@@ -869,7 +1050,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             { label: "Progress", value: `${project.progressPercentage || 0}%`, color: "var(--primary-color)" },
             { label: "Active Tasks", value: String(activeTaskCount), color: "#c4b5fd" },
             { label: "Team", value: String(editAssignedEmployeeIds.length), color: "var(--success-color)" },
-            { label: "Notes", value: String(projectNotes.length), color: "var(--text-primary)" },
+            { label: "Notes", value: String(publicProjectNotes.length), color: "var(--text-primary)" },
             ...(project.budgetAmount ? [{ label: "Budget", value: formatMoney(project.budgetAmount), color: "var(--warning-color)" }] : []),
           ].map(stat => (
             <div key={stat.label} className="project-stat-chip">
@@ -1393,14 +1574,174 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
+      {activeTab === "ADDITIONAL_DETAILS" && (
+        <div className="project-section">
+          <div className="project-section-header">
+            <div>
+              <h2>Additional Details</h2>
+              <p className="text-sm text-muted">Add a title, choose the purchase/start date, then keep notes for payments, bugs, renewals, or changes.</p>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: "16px" }}>
+              {ADDITIONAL_DETAIL_SECTIONS.map(section => {
+                const detailNotes = projectNotes
+                  .filter(note => {
+                    const decoded = decodeNote(note.content);
+                    return decoded.category === section.key && !decoded.isDetailProfile;
+                  })
+                  .sort((a, b) => {
+                    const aDate = decodeNote(a.content).date || a.createdAt;
+                    const bDate = decodeNote(b.content).date || b.createdAt;
+                    return bDate.localeCompare(aDate);
+                  });
+                const meta = categoryMeta(section.key);
+                const titleValue = section.key === "DOMAIN_DETAILS"
+                  ? editDomainName
+                  : section.key === "SERVER_DETAILS"
+                    ? editServerDetails
+                    : editMaintenanceTitle;
+                const dateValue = section.key === "DOMAIN_DETAILS"
+                  ? editDomainStartDate
+                  : section.key === "SERVER_DETAILS"
+                    ? editServerStartDate
+                    : editMaintenanceStartDate;
+                const setTitle = section.key === "DOMAIN_DETAILS"
+                  ? setEditDomainName
+                  : section.key === "SERVER_DETAILS"
+                    ? setEditServerDetails
+                    : setEditMaintenanceTitle;
+                const setDate = section.key === "DOMAIN_DETAILS"
+                  ? setEditDomainStartDate
+                  : section.key === "SERVER_DETAILS"
+                    ? setEditServerStartDate
+                    : setEditMaintenanceStartDate;
+                const isSavingThisDetail = savingDetailKey === section.key;
+
+                return (
+                  <div key={section.key} className="project-card-static">
+                    <div className="flex justify-between items-start gap-3 mb-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span style={{ fontSize: "1.05rem" }}>{meta.icon}</span>
+                          <h3 style={{ fontSize: "0.95rem", fontWeight: 600 }}>{section.title}</h3>
+                        </div>
+                        <p className="text-xs text-muted">{section.description}</p>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1.2fr) minmax(160px, 0.8fr)", gap: "14px", marginBottom: "14px" }}>
+                      <div>
+                        <label className="text-xs text-muted block mb-2">{section.titleLabel}</label>
+                        <input
+                          value={titleValue}
+                          onChange={event => setTitle(event.target.value)}
+                          placeholder={section.placeholder}
+                          style={{ width: "100%" }}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted block mb-2">{section.dateLabel}</label>
+                        <input
+                          type="date"
+                          value={dateValue}
+                          onChange={event => setDate(event.target.value)}
+                          style={{ width: "100%" }}
+                        />
+                      </div>
+                      {section.key === "MAINTENANCE_DETAILS" && (
+                        <div>
+                          <label className="text-xs text-muted block mb-2">AMC cost (USD)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={editAnnualMaintenanceCost}
+                            onChange={event => setEditAnnualMaintenanceCost(event.target.value)}
+                            placeholder="0.00"
+                            style={{ width: "100%" }}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-3 flex-wrap" style={{ marginBottom: "14px" }}>
+                      <button type="button" className="btn-primary" disabled={isSavingThisDetail} onClick={() => void saveAdditionalDetail(section.key)}>
+                        {isSavingThisDetail ? "Saving..." : "Save"}
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`add-${section.key.toLowerCase().replaceAll("_", "-")}-note`}
+                        className="btn-secondary"
+                        onClick={() => openNewNote(section.key)}
+                      >
+                        + Add note
+                      </button>
+                      <span className="text-sm text-muted">{detailNotes.length} note{detailNotes.length !== 1 ? "s" : ""}</span>
+                    </div>
+
+                    {detailNotes.length === 0 ? (
+                      <div className="project-empty-state" style={{ padding: "16px", minHeight: "auto" }}>
+                        <p>No notes yet. Add payments, bugs, renewal reminders, or changes here.</p>
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gap: "10px" }}>
+                        {detailNotes.map(note => {
+                          const decoded = decodeNote(note.content);
+                          const displayDate = decoded.date
+                            ? new Date(`${decoded.date}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+                            : new Date(note.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+                          return (
+                            <div key={note.id} style={{
+                              padding: "12px",
+                              border: "1px solid var(--border-color)",
+                              borderRadius: "8px",
+                              background: "rgba(255,255,255,0.03)",
+                            }}>
+                              <div className="flex justify-between items-start gap-3 mb-2">
+                                <div>
+                                  <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text-primary)" }}>{displayDate}</div>
+                                  <div className="text-xs text-muted">Maintained by {note.createdByName}</div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button type="button" onClick={() => openNoteForEdit(note)} className="btn-secondary" style={{ padding: "4px 8px", fontSize: "0.75rem" }}>
+                                    Edit
+                                  </button>
+                                  <button type="button" onClick={() => setDeleteNoteTargetId(note.id)} className="btn-secondary" style={{ padding: "4px 8px", fontSize: "0.75rem", color: "var(--danger-color)" }}>
+                                    Delete
+                                  </button>
+                                </div>
+                              </div>
+                              <p style={{ whiteSpace: "pre-wrap", fontSize: "0.88rem", lineHeight: 1.55, color: "var(--text-primary)" }}>{decoded.text}</p>
+                              {decoded.attachments.length > 0 && (
+                                <div style={{ marginTop: "10px", display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                                  {decoded.attachments.map((att, index) => (
+                                    <a key={`${att.url}-${index}`} href={att.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: "0.78rem", color: "var(--primary-color)" }}>
+                                      {att.fileName}
+                                    </a>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
+
       {activeTab === "NOTES" && (
         <div className="project-section">
           <div className="project-section-header">
             <div>
               <h2>Notes</h2>
-              <p className="text-sm text-muted">{projectNotes.length} note{projectNotes.length !== 1 ? "s" : ""} · attach files when adding notes</p>
+              <p className="text-sm text-muted">{publicProjectNotes.length} note{publicProjectNotes.length !== 1 ? "s" : ""} · attach files when adding notes</p>
             </div>
-            <button onClick={() => setShowNoteModal(true)} className="btn-primary" style={{ fontSize: "0.875rem" }}>
+            <button onClick={() => openNewNote()} className="btn-primary" style={{ fontSize: "0.875rem" }}>
               + Add Note
             </button>
           </div>
@@ -1408,10 +1749,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           <div className="project-toolbar">
             <span className="text-sm text-muted">Filter:</span>
             <button type="button" className={`project-tab${notesFilter === "ALL" ? " active" : ""}`} style={{ padding: "6px 12px", fontSize: "0.8rem" }} onClick={() => setNotesFilter("ALL")}>
-              All ({projectNotes.length})
+              All ({publicProjectNotes.length})
             </button>
             {NOTE_CATEGORIES.map(cat => {
-              const count = projectNotes.filter(n => decodeNote(n.content).category === cat.value).length;
+              const count = publicProjectNotes.filter(n => decodeNote(n.content).category === cat.value).length;
               if (count === 0) return null;
               return (
                 <button key={cat.value} type="button" className={`project-tab${notesFilter === cat.value ? " active" : ""}`} style={{ padding: "6px 12px", fontSize: "0.8rem" }} onClick={() => setNotesFilter(cat.value)}>

@@ -12,7 +12,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   );
 
   if (isAuthPage) {
-    return <>{children}</>;
+    return <ToastProvider>{children}</ToastProvider>;
   }
 
   return (

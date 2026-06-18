@@ -4,9 +4,11 @@ import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { verifyEmail } from "@/lib/api";
+import { useToast } from "@/lib/toast";
 
 function VerifyEmailContent() {
   const searchParams = useSearchParams();
+  const toast = useToast();
   const token = searchParams.get("token");
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [message, setMessage] = useState("Verifying your email...");
@@ -15,6 +17,7 @@ function VerifyEmailContent() {
     if (!token) {
       setStatus("error");
       setMessage("Missing verification token.");
+      toast.error("Missing verification token.");
       return;
     }
 
@@ -22,16 +25,20 @@ function VerifyEmailContent() {
     async function run() {
       try {
         const result = await verifyEmail(verificationToken);
+        const successMessage = result.message || "Email verified successfully.";
         setStatus("success");
-        setMessage(result.message || "Email verified successfully.");
+        setMessage(successMessage);
+        toast.success(successMessage);
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Verification failed.";
         setStatus("error");
-        setMessage(error instanceof Error ? error.message : "Verification failed.");
+        setMessage(errorMessage);
+        toast.error(errorMessage);
       }
     }
 
     void run();
-  }, [token]);
+  }, [toast, token]);
 
   return (
     <div style={{

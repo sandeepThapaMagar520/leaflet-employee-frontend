@@ -9,7 +9,6 @@ export default function LogsPage() {
   const [logs, setLogs] = useState<DailyLog[]>([]);
   const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [feedback, setFeedback] = useState("");
 
   const [logDate, setLogDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [summary, setSummary] = useState("");
@@ -31,7 +30,7 @@ export default function LogsPage() {
       const data = canManage ? await getAllDailyLogs() : await getMyDailyLogs();
       setLogs(data);
     } catch (error) {
-      setFeedback("Failed to load daily logs");
+      toast.error(error instanceof Error ? error.message : "Failed to load daily logs");
     } finally {
       setLoading(false);
     }
@@ -54,12 +53,10 @@ export default function LogsPage() {
       });
       setSummary("");
       setProblemsFaced("");
-      setFeedback("Log submitted successfully!");
+      toast.success("Log submitted successfully!");
       await loadData();
-      
-      setTimeout(() => setFeedback(""), 3000);
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Failed to submit log");
+      toast.error(error instanceof Error ? error.message : "Failed to submit log");
     }
   }
 
@@ -67,7 +64,6 @@ export default function LogsPage() {
     setEditingLog(log);
     setEditSummary(log.summary);
     setEditProblemsFaced(log.problemsFaced || "");
-    setFeedback("");
   }
 
   function cancelEdit() {
@@ -88,11 +84,10 @@ export default function LogsPage() {
         problemsFaced: editProblemsFaced,
       });
       cancelEdit();
-      setFeedback("Log updated successfully!");
+      toast.success("Log updated successfully!");
       await loadData();
-      setTimeout(() => setFeedback(""), 3000);
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Failed to update log");
+      toast.error(error instanceof Error ? error.message : "Failed to update log");
     } finally {
       setSavingEdit(false);
     }
@@ -133,16 +128,6 @@ export default function LogsPage() {
           {exporting ? "Exporting…" : "Export CSV"}
         </button>
       </div>
-
-      {feedback && (
-        <div style={{ 
-          background: feedback.includes("success") ? "rgba(16, 185, 129, 0.1)" : "rgba(239, 68, 68, 0.1)", 
-          color: feedback.includes("success") ? "var(--success-color)" : "var(--danger-color)", 
-          padding: "12px", borderRadius: "8px", marginBottom: "24px" 
-        }}>
-          {feedback}
-        </div>
-      )}
 
       {loading ? (
         <div style={{ display: "flex", justifyContent: "center", marginTop: "40px" }}>Loading logs...</div>

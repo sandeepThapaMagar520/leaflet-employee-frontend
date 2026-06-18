@@ -79,7 +79,6 @@ export default function AttendancePage() {
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [feedback, setFeedback] = useState("");
   const [filterName, setFilterName] = useState("");
   const [filterDate, setFilterDate] = useState(todayIsoDate());
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
@@ -91,7 +90,6 @@ export default function AttendancePage() {
   async function loadData(date = filterDate) {
     try {
       setLoading(true);
-      setFeedback("");
       const [active, history, summary, teamDaily] = await Promise.all([
         getActiveAttendanceSession(),
         canManage ? getAllAttendanceSessions() : getMyAttendanceSessions(),
@@ -103,7 +101,7 @@ export default function AttendancePage() {
       setTodaySummary(summary);
       setTeamSummaries(teamDaily);
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Failed to load attendance data");
+      toast.error(error instanceof Error ? error.message : "Failed to load attendance data");
     } finally {
       setLoading(false);
     }
@@ -139,7 +137,7 @@ export default function AttendancePage() {
       toast.success("Work session started.");
       await loadData();
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Failed to start work session");
+      toast.error(error instanceof Error ? error.message : "Failed to start work session");
     } finally {
       setWorking(false);
     }
@@ -152,7 +150,7 @@ export default function AttendancePage() {
       toast.success("Work session stopped.");
       await loadData();
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "Failed to stop work session");
+      toast.error(error instanceof Error ? error.message : "Failed to stop work session");
     } finally {
       setWorking(false);
     }
@@ -200,12 +198,6 @@ export default function AttendancePage() {
           {exporting ? "Exporting..." : "Export CSV"}
         </button>
       </div>
-
-      {feedback && (
-        <div style={{ background: "rgba(239, 68, 68, 0.1)", color: "var(--danger-color)", padding: "12px", borderRadius: "8px", marginBottom: "24px" }}>
-          {feedback}
-        </div>
-      )}
 
       {!authLoaded || loading ? (
         <div style={{ display: "flex", justifyContent: "center", marginTop: "40px" }}>Loading attendance...</div>

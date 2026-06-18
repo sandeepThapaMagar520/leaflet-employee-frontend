@@ -4,9 +4,11 @@ import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { createProject, User, getUsers } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const toast = useToast();
   const { loading: authLoading } = useAuth(["ADMIN", "MANAGER"]);
 
   const [name, setName] = useState("");
@@ -22,20 +24,19 @@ export default function NewProjectPage() {
   const [employees, setEmployees] = useState<User[]>([]);
   const [assignedEmployeeIds, setAssignedEmployeeIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
   useEffect(() => {
     async function loadUsers() {
       try {
-        const users = await getUsers();
-        setManagers(users.filter(u => u.role === "ADMIN" || u.role === "MANAGER"));
-        setEmployees(users.filter(u => u.role === "EMPLOYEE"));
-      } catch (err) {
-        console.error("Failed to load users", err);
+      const users = await getUsers();
+      setManagers(users.filter(u => u.role === "ADMIN" || u.role === "MANAGER"));
+      setEmployees(users.filter(u => u.role === "EMPLOYEE"));
+    } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to load project team options");
       }
     }
     if (!authLoading) void loadUsers();
-  }, [authLoading]);
+  }, [authLoading, toast]);
 
   if (authLoading) return <div className="p-8">Verifying access...</div>;
 
@@ -48,16 +49,15 @@ export default function NewProjectPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || !managerId) {
-      setError("Project name and manager are required.");
+      toast.error("Project name and manager are required.");
       return;
     }
     const parsedBudget = budgetAmount.trim() === "" ? undefined : parseFloat(budgetAmount);
     if (parsedBudget !== undefined && (Number.isNaN(parsedBudget) || parsedBudget < 0)) {
-      setError("Budget must be a valid positive number.");
+      toast.error("Budget must be a valid positive number.");
       return;
     }
     setLoading(true);
-    setError("");
     try {
       await createProject({
         name: name.trim(),
@@ -68,9 +68,10 @@ export default function NewProjectPage() {
         budgetAmount: parsedBudget,
         assignedEmployeeIds,
       });
+      toast.success("Project created.");
       router.push("/projects");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create project");
+      toast.error(err instanceof Error ? err.message : "Failed to create project");
     } finally {
       setLoading(false);
     }
@@ -95,12 +96,6 @@ export default function NewProjectPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="glass-panel" style={{ padding: "32px" }}>
-        {error && (
-          <div style={{ background: "rgba(239, 68, 68, 0.1)", color: "var(--danger-color)", padding: "12px", borderRadius: "8px", marginBottom: "24px", fontSize: "0.9rem" }}>
-            {error}
-          </div>
-        )}
-
         <div style={{ display: "grid", gap: "24px" }}>
 
           {/* Name */}

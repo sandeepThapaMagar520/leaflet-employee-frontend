@@ -1317,13 +1317,6 @@ h1, h2, h3, h4 {
   margin-bottom: 24px;
 }
 
-.project-feedback {
-  padding: 12px 16px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-  font-size: 0.9rem;
-}
-
 .project-team-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -1928,7 +1921,7 @@ h1, h2, h3, h4 {
 
 .toast-container {
   position: fixed;
-  bottom: 24px;
+  top: 24px;
   right: 24px;
   z-index: 9999;
   display: flex;
@@ -2508,11 +2501,20 @@ h1, h2, h3, h4 {
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(-8px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .toast-container {
+    top: 14px;
+    right: 14px;
+    left: 14px;
+    max-width: none;
   }
 }
 

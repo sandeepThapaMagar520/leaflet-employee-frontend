@@ -4,11 +4,13 @@ import Link from "next/link";
 import { FormEvent, Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { requestPasswordReset, setPassword, startAccountSetup, verifyPasswordOtp } from "@/lib/api";
+import { useToast } from "@/lib/toast";
 
 type Step = "setup" | "email" | "otp" | "password" | "success";
 
 function ResetPasswordContent() {
   const searchParams = useSearchParams();
+  const toast = useToast();
   const setupMode = searchParams.get("mode") === "setup";
   const recoveryMode = searchParams.get("mode") === "forgot";
   const initialEmail = searchParams.get("email") ?? "";
@@ -23,20 +25,19 @@ function ResetPasswordContent() {
   const [message, setMessage] = useState(
     startsWithOtp ? `Enter the OTP sent to ${initialEmail}.` : ""
   );
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSetup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
-    setError("");
     try {
       const result = await startAccountSetup({ email, temporaryPassword });
       setMessage(result.message);
+      toast.success(result.message);
       setTemporaryPassword("");
       setStep("otp");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Temporary password verification failed.");
+      toast.error(requestError instanceof Error ? requestError.message : "Temporary password verification failed.");
     } finally {
       setLoading(false);
     }
@@ -45,13 +46,13 @@ function ResetPasswordContent() {
   async function handleEmail(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
-    setError("");
     try {
       const result = await requestPasswordReset(email);
       setMessage(result.message);
+      toast.success(result.message);
       setStep("otp");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not send the OTP.");
+      toast.error(requestError instanceof Error ? requestError.message : "Could not send the OTP.");
     } finally {
       setLoading(false);
     }
@@ -60,14 +61,14 @@ function ResetPasswordContent() {
   async function handleOtp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
-    setError("");
     try {
       const result = await verifyPasswordOtp({ email, otp });
       setResetToken(result.resetToken);
       setMessage(result.message);
+      toast.success(result.message);
       setStep("password");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "OTP verification failed.");
+      toast.error(requestError instanceof Error ? requestError.message : "OTP verification failed.");
     } finally {
       setLoading(false);
     }
@@ -75,18 +76,18 @@ function ResetPasswordContent() {
 
   async function handlePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError("");
     if (newPassword !== confirmPassword) {
-      setError("New password and confirmation do not match.");
+      toast.error("New password and confirmation do not match.");
       return;
     }
     setLoading(true);
     try {
       const result = await setPassword({ resetToken, newPassword });
       setMessage(result.message);
+      toast.success(result.message);
       setStep("success");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not save the password.");
+      toast.error(requestError instanceof Error ? requestError.message : "Could not save the password.");
     } finally {
       setLoading(false);
     }
@@ -241,18 +242,6 @@ function ResetPasswordContent() {
           <p aria-live="polite" className="text-muted" style={{ marginTop: "18px", fontSize: "0.84rem", lineHeight: 1.55 }}>
             {message}
           </p>
-        )}
-        {error && (
-          <div role="alert" style={{
-            marginTop: "18px",
-            padding: "12px",
-            borderRadius: "8px",
-            background: "rgba(239, 68, 68, 0.1)",
-            color: "var(--danger-color)",
-            fontSize: "0.85rem",
-          }}>
-            {error}
-          </div>
         )}
       </section>
     </main>

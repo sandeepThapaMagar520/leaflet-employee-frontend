@@ -10,6 +10,7 @@ import {
   getProjectNotes, createProjectNote, ProjectNote,
 } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 import ProjectKanban from "@/app/components/ProjectKanban";
 
 const taskStatusOptions: TaskStatus[] = ["TODO", "IN_PROGRESS", "BLOCKED", "DONE"];
@@ -24,6 +25,7 @@ const getStatusBadgeClass = (s: string) =>
 
 export default function EmployeeProjectView({ projectId }: { projectId: number }) {
   const router = useRouter();
+  const toast = useToast();
   const { loading: authLoading, user } = useAuth(["EMPLOYEE"]);
 
   const [project, setProject] = useState<Project | null>(null);
@@ -57,8 +59,15 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [uploadingNoteFiles, setUploadingNoteFiles] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
+  const [activeTab, setActiveTab] = useState<"OVERVIEW" | "MILESTONES" | "TASKS" | "NOTES">("OVERVIEW");
   const commentFileInputRef = useRef<HTMLInputElement>(null);
   const noteFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!feedback) return;
+    if (feedbackKind === "success") toast.success(feedback);
+    else toast.error(feedback);
+  }, [feedback, feedbackKind, toast]);
 
   async function loadData() {
     setLoading(true);
@@ -332,12 +341,10 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
     );
   }
 
-  const feedbackStyles = feedbackKind === "success"
-    ? { background: "rgba(34,197,94,0.12)", color: "var(--success-color,#22c55e)" }
-    : { background: "rgba(239,68,68,0.1)", color: "var(--danger-color)" };
   const myMembership = project.assignedEmployees.find(employee => employee.id === user?.userId);
   const canManageTasks = myMembership?.canManageTasks ?? false;
   const canAddNotes = myMembership?.canAddNotes ?? false;
+  const activeTaskCount = projectTasks.filter(task => task.status !== "DONE").length;
   const taskAssignees = [
     { id: project.managerId, fullName: project.managerName },
     ...project.assignedEmployees,
@@ -382,48 +389,97 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="flex items-center gap-6 mb-8">
-        <button onClick={() => router.push("/projects")} className="btn-secondary"
-          style={{ padding: "8px 16px", display: "flex", alignItems: "center", gap: "8px" }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
-          </svg>
-          Projects
-        </button>
-        <div>
-          <h1 className="text-gradient" style={{ fontSize: "2.2rem", lineHeight: 1.2 }}>{project.name}</h1>
-          <p className="text-muted" style={{ marginTop: "4px" }}>View project board and your assigned tasks.</p>
+    <div className="max-w-6xl mx-auto">
+      <nav className="project-breadcrumb">
+        <button type="button" onClick={() => router.push("/projects")}>Projects</button>
+        <span>/</span>
+        <span style={{ color: "var(--text-primary)" }}>{project.name}</span>
+      </nav>
+
+      <div className="glass-panel project-hero">
+        <div className="project-hero-top">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="flex items-center gap-3 flex-wrap mb-3">
+              <h1 style={{ fontSize: "1.75rem", fontWeight: 700, lineHeight: 1.25 }}>{project.name}</h1>
+              <span className={`badge ${getStatusBadgeClass(project.status)}`}>{project.status.replace("_", " ")}</span>
+            </div>
+            <div className="flex gap-4 flex-wrap text-sm text-muted">
+              <span>Manager: <strong style={{ color: "var(--text-primary)", fontWeight: 500 }}>{project.managerName}</strong></span>
+              {project.dueDate && <span>Due: <strong style={{ color: "var(--warning-color)", fontWeight: 500 }}>{new Date(project.dueDate).toLocaleDateString()}</strong></span>}
+              <span>ID #{project.id}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="project-stat-strip">
+          {[
+            { label: "Progress", value: `${project.progressPercentage || 0}%`, color: "var(--primary-color)" },
+            { label: "Active Tasks", value: String(activeTaskCount), color: "#c4b5fd" },
+            { label: "My Tasks", value: String(myTasks.length), color: "var(--success-color)" },
+            { label: "Notes", value: String(projectNotes.length), color: "var(--text-primary)" },
+          ].map(stat => (
+            <div key={stat.label} className="project-stat-chip">
+              <div className="label">{stat.label}</div>
+              <div className="value" style={{ color: stat.color }}>{stat.value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="project-tabs" style={{ marginBottom: "20px" }}>
+          {[
+            { id: "OVERVIEW" as const, label: "Overview" },
+            { id: "MILESTONES" as const, label: "Milestones" },
+            { id: "TASKS" as const, label: "Tasks" },
+            { id: "NOTES" as const, label: "Notes" },
+          ].map(tab => (
+            <button key={tab.id} type="button" className={`project-tab${activeTab === tab.id ? " active" : ""}`} onClick={() => setActiveTab(tab.id)}>
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {feedback && (
-        <div style={{ ...feedbackStyles, padding: "12px", borderRadius: "8px", marginBottom: "24px" }}>
-          {feedback}
+      <div style={{ paddingBottom: "48px" }}>
+      {activeTab === "OVERVIEW" && (
+        <div className="project-overview-grid" style={{ display: "grid", gridTemplateColumns: "1fr minmax(260px, 320px)", gap: "20px" }}>
+          <div className="project-card-static">
+            <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "12px" }}>About</h3>
+            <p style={{ lineHeight: 1.75, color: "var(--text-secondary)", fontSize: "0.95rem" }}>{project.description || "No description provided."}</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginTop: "28px", paddingTop: "24px", borderTop: "1px solid var(--border-color)" }}>
+              {[
+                { label: "Start", value: project.startDate ? new Date(project.startDate).toLocaleDateString() : "—" },
+                { label: "Due", value: project.dueDate ? new Date(project.dueDate).toLocaleDateString() : "—" },
+                { label: "Updated", value: project.updatedAt ? new Date(project.updatedAt).toLocaleDateString() : "—" },
+              ].map(item => <div key={item.label}><div className="text-xs text-muted mb-1">{item.label}</div><div style={{ fontWeight: 500, fontSize: "0.9rem" }}>{item.value}</div></div>)}
+            </div>
+          </div>
+          <div className="project-card-static">
+            <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "16px" }}>Progress</h3>
+            <div style={{ fontSize: "2.5rem", fontWeight: 700, marginBottom: "12px", color: "var(--primary-color)" }}>{project.progressPercentage || 0}%</div>
+            <div style={{ height: "8px", background: "rgba(255,255,255,0.06)", borderRadius: "99px", overflow: "hidden", marginBottom: "20px" }}>
+              <div style={{ width: `${project.progressPercentage || 0}%`, height: "100%", background: "linear-gradient(90deg, var(--primary-color), var(--accent-color))" }} />
+            </div>
+            <div style={{ paddingTop: "16px", borderTop: "1px solid var(--border-color)" }}>
+              <div className="text-xs text-muted mb-1">Project Manager</div>
+              <div style={{ fontWeight: 500, fontSize: "0.9rem" }}>{project.managerName}</div>
+              <div className="text-xs text-muted mt-3 mb-1">Team Size</div>
+              <div style={{ fontWeight: 500, fontSize: "0.9rem" }}>{project.assignedEmployees.length} employees</div>
+            </div>
+          </div>
         </div>
       )}
 
-      <div className="glass-panel" style={{ padding: "32px", marginBottom: "32px" }}>
-        <div className="flex items-center gap-3 mb-2">
-          <span className={`badge ${getStatusBadgeClass(project.status)}`}>{project.status}</span>
-          <span className="text-sm text-muted">Manager: {project.managerName}</span>
-          {project.dueDate && (
-            <span className="text-sm text-muted">
-              Due: {new Date(project.dueDate).toLocaleDateString()}
-            </span>
-          )}
+      {activeTab === "MILESTONES" && (
+      <div className="project-section">
+        <div className="project-section-header">
+          <div>
+            <h2>Milestones</h2>
+            <p className="text-sm text-muted">Project checkpoints and delivery dates.</p>
+          </div>
         </div>
-        {project.description && (
-          <p style={{ lineHeight: 1.7, color: "var(--text-secondary)", marginTop: "12px" }}>
-            {project.description}
-          </p>
-        )}
-      </div>
-
-      <div className="glass-card" style={{ marginBottom: "32px" }}>
+        <div className="project-card-static">
         <div className="mb-5">
-          <h2 style={{ fontSize: "1.25rem" }}>Milestones</h2>
-          <p className="text-sm text-muted">Project checkpoints and delivery dates.</p>
+          <h3 style={{ fontSize: "1rem" }}>{milestones.length} milestone{milestones.length !== 1 ? "s" : ""}</h3>
         </div>
         <div style={{ display: "grid", gap: "12px" }}>
           {milestones.map(milestone => (
@@ -439,16 +495,20 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
           {milestones.length === 0 && <p className="text-muted">No milestones yet.</p>}
         </div>
       </div>
+      </div>
+      )}
 
-      <div className="mb-10">
+      {activeTab === "TASKS" && (
+      <>
+      <div className="project-section">
         <div className="flex justify-between items-end gap-4 mb-6">
           <div>
-            <h2 style={{ fontSize: "1.8rem" }}>Project Board</h2>
-            <p className="text-muted">
+            <h2>Task Board</h2>
+            <p className="text-sm text-muted">
               {canManageTasks ? "Create, assign, edit, and move tasks for this project." : "Overview of all tasks on this project."}
             </p>
           </div>
-          {canManageTasks && <button type="button" className="btn-primary" onClick={openNewTask}>New Task</button>}
+          {canManageTasks && <button type="button" className="btn-primary" onClick={openNewTask}>+ New Task</button>}
         </div>
         <ProjectKanban
           tasks={projectTasks}
@@ -617,16 +677,19 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
           </div>
         )}
       </div>
+      </>
+      )}
 
-      <div className="glass-card" style={{ marginTop: "32px" }}>
-        <div className="flex justify-between items-start gap-4 mb-5">
+      {activeTab === "NOTES" && (
+      <div className="project-section">
+        <div className="project-section-header">
           <div>
-            <h2 style={{ fontSize: "1.25rem" }}>Project Notes</h2>
+            <h2>Notes</h2>
             <p className="text-sm text-muted">Notes shared with everyone assigned to this project.</p>
           </div>
           {canAddNotes
-            ? <button type="button" className="btn-primary" onClick={() => setShowNoteForm(true)}>Add Note</button>
-            : <span className="badge badge-in-progress">{projectNotes.length}</span>}
+            ? <button type="button" className="btn-primary" onClick={() => setShowNoteForm(true)}>+ Add Note</button>
+            : null}
         </div>
         <div className="employee-note-grid">
           {projectNotes.map(note => {
@@ -658,6 +721,8 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
           })}
           {projectNotes.length === 0 && <p className="text-muted">No team notes yet.</p>}
         </div>
+      </div>
+      )}
       </div>
 
       {showNoteForm && canAddNotes && (
