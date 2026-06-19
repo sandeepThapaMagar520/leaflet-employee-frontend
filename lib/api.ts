@@ -3,6 +3,10 @@ import { handleUnauthorized } from "./auth";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080/api/v1";
 
 export type Role = "ADMIN" | "MANAGER" | "EMPLOYEE";
+export type AccountStatus = "INVITE_SENT" | "SETUP_PENDING" | "VERIFIED";
+export type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACTOR" | "INTERN";
+export type StaffDocumentType = "CONTRACT" | "ID_PROOF" | "RESUME" | "OFFER_LETTER" | "CERTIFICATE" | "OTHER";
+export type StaffAuditAction = "REGISTERED" | "UPDATED" | "DEACTIVATED" | "DOCUMENT_ADDED" | "DOCUMENT_REMOVED";
 export type TaskStatus = string;
 export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type ProjectStatus = "PLANNED" | "ACTIVE" | "ON_HOLD" | "COMPLETED";
@@ -70,6 +74,18 @@ export type User = {
   active: boolean;
   jobTitle: string | null;
   profilePhotoUrl: string | null;
+  employeeId: string | null;
+  joiningDate: string | null;
+  employmentType: EmploymentType;
+  phone: string | null;
+  emergencyContact: string | null;
+  department: string | null;
+  location: string | null;
+  timezone: string;
+  accountStatus: AccountStatus;
+  emailVerified: boolean;
+  mustChangePassword: boolean;
+  lastLoginAt: string | null;
 };
 
 export type PageResponse<T> = {
@@ -237,6 +253,25 @@ export type StaffOverview = {
   attendanceSessions: AttendanceSession[];
   leaveRequests: LeaveRequest[];
   dailyLogs: DailyLog[];
+  documents: StaffDocument[];
+  auditEvents: StaffAuditEvent[];
+};
+
+export type StaffDocument = {
+  id: number;
+  documentType: StaffDocumentType;
+  fileName: string;
+  fileUrl: string;
+  note: string | null;
+  createdAt: string;
+};
+
+export type StaffAuditEvent = {
+  id: number;
+  action: StaffAuditAction;
+  description: string;
+  actorName: string;
+  createdAt: string;
 };
 
 export type LeaveBalance = {
@@ -484,6 +519,13 @@ export async function registerUser(payload: {
   role: Role;
   temporaryPassword: string;
   jobTitle: string;
+  employeeId?: string;
+  joiningDate?: string;
+  employmentType?: EmploymentType;
+  phone?: string;
+  emergencyContact?: string;
+  department?: string;
+  location?: string;
 }) {
   return request<StaffRegistrationResponse>("/auth/register", {
     method: "POST",
@@ -493,7 +535,21 @@ export async function registerUser(payload: {
 
 export async function updateUser(
   id: number,
-  payload: { fullName: string; email: string; role: Role; active: boolean; jobTitle: string }
+  payload: {
+    fullName: string;
+    email: string;
+    role: Role;
+    active: boolean;
+    jobTitle: string;
+    employeeId?: string;
+    joiningDate?: string;
+    employmentType: EmploymentType;
+    phone?: string;
+    emergencyContact?: string;
+    department?: string;
+    location?: string;
+    timezone?: string;
+  }
 ) {
   return request<User>(`/users/${id}`, {
     method: "PUT",
@@ -503,6 +559,20 @@ export async function updateUser(
 
 export async function deleteUser(id: number): Promise<void> {
   await request<void>(`/users/${id}`, { method: "DELETE" });
+}
+
+export async function addStaffDocument(
+  userId: number,
+  payload: { documentType: StaffDocumentType; fileName: string; fileUrl: string; note?: string }
+) {
+  return request<StaffDocument>(`/users/${userId}/documents`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteStaffDocument(userId: number, documentId: number): Promise<void> {
+  await request<void>(`/users/${userId}/documents/${documentId}`, { method: "DELETE" });
 }
 
 export async function getProjects() {
@@ -881,7 +951,7 @@ export async function markAllNotificationsRead() {
 }
 
 export async function downloadExport(
-  type: "attendance" | "logs",
+  type: "attendance" | "logs" | `staff/${number}`,
   filename: string,
   filters?: { from?: string; to?: string }
 ) {

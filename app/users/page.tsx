@@ -2,17 +2,20 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { deleteUser, getUsersPaged, registerUser, Role, updateUser, User } from "@/lib/api";
+import { AccountStatus, deleteUser, EmploymentType, getUsersPaged, registerUser, Role, updateUser, User } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import ActionModal from "@/app/components/ActionModal";
 import Pagination from "@/app/components/Pagination";
 
 const roleOptions: Role[] = ["EMPLOYEE", "MANAGER", "ADMIN"];
+const employmentTypeOptions: EmploymentType[] = ["FULL_TIME", "PART_TIME", "CONTRACTOR", "INTERN"];
 type RoleFilter = "ALL" | Role;
 type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
 
 const roleLabel = (role: Role) => role.charAt(0) + role.slice(1).toLowerCase();
+const titleCase = (value: string) => value.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, char => char.toUpperCase());
+const accountStatusLabel = (status: AccountStatus) => titleCase(status);
 const initials = (name: string) => name.split(" ").filter(Boolean).map(part => part[0]).join("").slice(0, 2).toUpperCase();
 
 export default function UsersAdminPage() {
@@ -33,6 +36,13 @@ export default function UsersAdminPage() {
   const [role, setRole] = useState<Role>("EMPLOYEE");
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [jobTitle, setJobTitle] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
+  const [joiningDate, setJoiningDate] = useState("");
+  const [employmentType, setEmploymentType] = useState<EmploymentType>("FULL_TIME");
+  const [phone, setPhone] = useState("");
+  const [emergencyContact, setEmergencyContact] = useState("");
+  const [department, setDepartment] = useState("");
+  const [location, setLocation] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -41,6 +51,14 @@ export default function UsersAdminPage() {
   const [editRole, setEditRole] = useState<Role>("EMPLOYEE");
   const [editActive, setEditActive] = useState(true);
   const [editJobTitle, setEditJobTitle] = useState("");
+  const [editEmployeeId, setEditEmployeeId] = useState("");
+  const [editJoiningDate, setEditJoiningDate] = useState("");
+  const [editEmploymentType, setEditEmploymentType] = useState<EmploymentType>("FULL_TIME");
+  const [editPhone, setEditPhone] = useState("");
+  const [editEmergencyContact, setEditEmergencyContact] = useState("");
+  const [editDepartment, setEditDepartment] = useState("");
+  const [editLocation, setEditLocation] = useState("");
+  const [editTimezone, setEditTimezone] = useState("Asia/Kathmandu");
   const [savingEdit, setSavingEdit] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -83,7 +101,7 @@ export default function UsersAdminPage() {
   const metrics = useMemo(() => ({
     active: users.filter(user => user.active).length,
     managers: users.filter(user => user.role === "MANAGER").length,
-    admins: users.filter(user => user.role === "ADMIN").length,
+    pending: users.filter(user => user.accountStatus !== "VERIFIED").length,
   }), [users]);
 
   function closePanel() {
@@ -99,6 +117,14 @@ export default function UsersAdminPage() {
     setEditRole(user.role);
     setEditActive(user.active);
     setEditJobTitle(user.jobTitle ?? "");
+    setEditEmployeeId(user.employeeId ?? "");
+    setEditJoiningDate(user.joiningDate ?? "");
+    setEditEmploymentType(user.employmentType ?? "FULL_TIME");
+    setEditPhone(user.phone ?? "");
+    setEditEmergencyContact(user.emergencyContact ?? "");
+    setEditDepartment(user.department ?? "");
+    setEditLocation(user.location ?? "");
+    setEditTimezone(user.timezone ?? "Asia/Kathmandu");
     setPanelMode("edit");
   }
 
@@ -106,13 +132,33 @@ export default function UsersAdminPage() {
     event.preventDefault();
     setSubmitting(true);
     try {
-      const result = await registerUser({ fullName, email, role, temporaryPassword, jobTitle });
+      const result = await registerUser({
+        fullName,
+        email,
+        role,
+        temporaryPassword,
+        jobTitle,
+        employeeId,
+        joiningDate: joiningDate || undefined,
+        employmentType,
+        phone,
+        emergencyContact,
+        department,
+        location,
+      });
       toast.success(result.message);
       setFullName("");
       setEmail("");
       setRole("EMPLOYEE");
       setTemporaryPassword("");
       setJobTitle("");
+      setEmployeeId("");
+      setJoiningDate("");
+      setEmploymentType("FULL_TIME");
+      setPhone("");
+      setEmergencyContact("");
+      setDepartment("");
+      setLocation("");
       setPanelMode(null);
       await loadData(0);
     } catch (error) {
@@ -133,6 +179,14 @@ export default function UsersAdminPage() {
         role: editRole,
         active: editActive,
         jobTitle: editJobTitle,
+        employeeId: editEmployeeId,
+        joiningDate: editJoiningDate || undefined,
+        employmentType: editEmploymentType,
+        phone: editPhone,
+        emergencyContact: editEmergencyContact,
+        department: editDepartment,
+        location: editLocation,
+        timezone: editTimezone,
       });
       toast.success(`${editFullName} was updated.`);
       setPanelMode(null);
@@ -179,7 +233,7 @@ export default function UsersAdminPage() {
         <div><span>Total staff</span><strong>{totalElements}</strong></div>
         <div><span>Active on this page</span><strong>{metrics.active}</strong></div>
         <div><span>Managers</span><strong>{metrics.managers}</strong></div>
-        <div><span>Administrators</span><strong>{metrics.admins}</strong></div>
+        <div><span>Onboarding pending</span><strong>{metrics.pending}</strong></div>
       </section>
 
       <section className="staff-directory">
@@ -208,13 +262,13 @@ export default function UsersAdminPage() {
         <div className="staff-table-wrap">
           <table className="staff-table">
             <thead>
-              <tr><th>Staff member</th><th>Job title</th><th>Role</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
+              <tr><th>Staff member</th><th>Job title</th><th>Role</th><th>Onboarding</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={5} className="staff-empty">Loading staff...</td></tr>
+                <tr><td colSpan={6} className="staff-empty">Loading staff...</td></tr>
               ) : visibleUsers.length === 0 ? (
-                <tr><td colSpan={5} className="staff-empty">No staff match these filters.</td></tr>
+                <tr><td colSpan={6} className="staff-empty">No staff match these filters.</td></tr>
               ) : visibleUsers.map(user => (
                 <tr key={user.id}>
                   <td>
@@ -230,8 +284,9 @@ export default function UsersAdminPage() {
                       <span><strong>{user.fullName}</strong><small>{user.email}</small></span>
                     </Link>
                   </td>
-                  <td><span className="staff-job-title">{user.jobTitle || "Not assigned"}</span></td>
+                  <td><span className="staff-job-title">{user.jobTitle || "Not assigned"}{user.employeeId ? ` · ${user.employeeId}` : ""}</span></td>
                   <td><span className={`staff-role staff-role-${user.role.toLowerCase()}`}>{roleLabel(user.role)}</span></td>
+                  <td><span className={`staff-status ${user.accountStatus === "VERIFIED" ? "active" : "inactive"}`}><i aria-hidden="true" />{accountStatusLabel(user.accountStatus)}</span></td>
                   <td><span className={`staff-status ${user.active ? "active" : "inactive"}`}><i aria-hidden="true" />{user.active ? "Active" : "Inactive"}</span></td>
                   <td>
                     <div className="staff-row-actions">
@@ -269,6 +324,19 @@ export default function UsersAdminPage() {
                   <label><span>Work email</span><input type="email" value={email} onChange={event => setEmail(event.target.value)} required placeholder="jane@company.com" /></label>
                   <label><span>Job title</span><input value={jobTitle} onChange={event => setJobTitle(event.target.value)} required maxLength={100} placeholder="Software Engineer" /></label>
                   <label><span>Role</span><select value={role} onChange={event => setRole(event.target.value as Role)}>{roleOptions.map(option => <option key={option} value={option}>{roleLabel(option)}</option>)}</select></label>
+                  <div className="staff-form-split">
+                    <label><span>Employee ID</span><input value={employeeId} onChange={event => setEmployeeId(event.target.value)} maxLength={50} placeholder="EMP-001" /></label>
+                    <label><span>Joining date</span><input type="date" value={joiningDate} onChange={event => setJoiningDate(event.target.value)} /></label>
+                  </div>
+                  <label><span>Employment type</span><select value={employmentType} onChange={event => setEmploymentType(event.target.value as EmploymentType)}>{employmentTypeOptions.map(option => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
+                  <div className="staff-form-split">
+                    <label><span>Department</span><input value={department} onChange={event => setDepartment(event.target.value)} maxLength={100} placeholder="Engineering" /></label>
+                    <label><span>Location</span><input value={location} onChange={event => setLocation(event.target.value)} maxLength={120} placeholder="Kathmandu" /></label>
+                  </div>
+                  <div className="staff-form-split">
+                    <label><span>Phone</span><input value={phone} onChange={event => setPhone(event.target.value)} maxLength={50} placeholder="+977..." /></label>
+                    <label><span>Emergency contact</span><input value={emergencyContact} onChange={event => setEmergencyContact(event.target.value)} maxLength={120} placeholder="Name / phone" /></label>
+                  </div>
                 </div>
                 <div className="staff-form-section">
                   <h3>First-time access</h3>
@@ -288,9 +356,23 @@ export default function UsersAdminPage() {
                   <label><span>Work email</span><input type="email" value={editEmail} onChange={event => setEditEmail(event.target.value)} required /></label>
                   <label><span>Job title</span><input value={editJobTitle} onChange={event => setEditJobTitle(event.target.value)} maxLength={100} placeholder="Software Engineer" /></label>
                   <div className="staff-form-split">
+                    <label><span>Employee ID</span><input value={editEmployeeId} onChange={event => setEditEmployeeId(event.target.value)} maxLength={50} /></label>
+                    <label><span>Joining date</span><input type="date" value={editJoiningDate} onChange={event => setEditJoiningDate(event.target.value)} /></label>
+                  </div>
+                  <label><span>Employment type</span><select value={editEmploymentType} onChange={event => setEditEmploymentType(event.target.value as EmploymentType)}>{employmentTypeOptions.map(option => <option key={option} value={option}>{titleCase(option)}</option>)}</select></label>
+                  <div className="staff-form-split">
                     <label><span>Role</span><select value={editRole} onChange={event => setEditRole(event.target.value as Role)}>{roleOptions.map(option => <option key={option} value={option}>{roleLabel(option)}</option>)}</select></label>
                     <label><span>Status</span><select value={editActive ? "true" : "false"} onChange={event => setEditActive(event.target.value === "true")}><option value="true">Active</option><option value="false">Inactive</option></select></label>
                   </div>
+                  <div className="staff-form-split">
+                    <label><span>Department</span><input value={editDepartment} onChange={event => setEditDepartment(event.target.value)} maxLength={100} /></label>
+                    <label><span>Location</span><input value={editLocation} onChange={event => setEditLocation(event.target.value)} maxLength={120} /></label>
+                  </div>
+                  <div className="staff-form-split">
+                    <label><span>Phone</span><input value={editPhone} onChange={event => setEditPhone(event.target.value)} maxLength={50} /></label>
+                    <label><span>Emergency contact</span><input value={editEmergencyContact} onChange={event => setEditEmergencyContact(event.target.value)} maxLength={120} /></label>
+                  </div>
+                  <label><span>Timezone</span><input value={editTimezone} onChange={event => setEditTimezone(event.target.value)} maxLength={50} placeholder="Asia/Kathmandu" /></label>
                 </div>
                 <div className="staff-panel-actions">
                   <button type="button" className="btn-secondary" onClick={closePanel}>Cancel</button>
