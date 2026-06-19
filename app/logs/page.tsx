@@ -4,17 +4,24 @@ import { FormEvent, useEffect, useState } from "react";
 import { createDailyLog, DailyLog, getMyDailyLogs, getAllDailyLogs, downloadExport, updateDailyLog } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 
+function formatLocalDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export default function LogsPage() {
   const toast = useToast();
+  const today = formatLocalDate(new Date());
   const [logs, setLogs] = useState<DailyLog[]>([]);
   const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const [logDate, setLogDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [logDate, setLogDate] = useState(today);
   const [summary, setSummary] = useState("");
   const [problemsFaced, setProblemsFaced] = useState("");
   const [filterName, setFilterName] = useState("");
-  const [filterDate, setFilterDate] = useState("");
   const [editingLog, setEditingLog] = useState<DailyLog | null>(null);
   const [editSummary, setEditSummary] = useState("");
   const [editProblemsFaced, setEditProblemsFaced] = useState("");
@@ -23,6 +30,9 @@ export default function LogsPage() {
   const authUser = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("auth_user") || "{}") : null;
   const canManage = authUser?.role === "ADMIN" || authUser?.role === "MANAGER";
   const isAdmin = authUser?.role === "ADMIN";
+  const [filterFrom, setFilterFrom] = useState(isAdmin ? today : "");
+  const [filterTo, setFilterTo] = useState(isAdmin ? today : "");
+  const hasInvalidDateRange = Boolean(filterFrom && filterTo && filterFrom > filterTo);
 
   async function loadData() {
     try {
@@ -94,12 +104,20 @@ export default function LogsPage() {
   }
 
   async function handleExport() {
+    if (hasInvalidDateRange) {
+      toast.error("From date must be before or equal to To date.");
+      return;
+    }
+
     setExporting(true);
     try {
+      const rangeLabel = filterFrom || filterTo
+        ? `${filterFrom || "start"}-to-${filterTo || "latest"}`
+        : "all";
       await downloadExport(
         "logs",
-        filterDate ? `daily-logs-${filterDate}.csv` : "daily-logs-export.csv",
-        filterDate ? { from: filterDate, to: filterDate } : undefined
+        `daily-logs-${rangeLabel}.csv`,
+        filterFrom || filterTo ? { from: filterFrom || undefined, to: filterTo || undefined } : undefined
       );
       toast.success("Daily logs exported.");
     } catch (error) {
@@ -111,9 +129,16 @@ export default function LogsPage() {
 
   const filteredLogs = logs.filter(log => {
     const matchesName = log.userFullName.toLowerCase().includes(filterName.toLowerCase());
-    const matchesDate = filterDate ? log.logDate.startsWith(filterDate) : true;
-    return matchesName && matchesDate;
+    const matchesFrom = filterFrom ? log.logDate >= filterFrom : true;
+    const matchesTo = filterTo ? log.logDate <= filterTo : true;
+    return matchesName && matchesFrom && matchesTo;
   });
+
+  const dateRangeLabel = filterFrom && filterTo
+    ? filterFrom === filterTo ? filterFrom : `${filterFrom} to ${filterTo}`
+    : filterFrom ? `From ${filterFrom}`
+      : filterTo ? `Until ${filterTo}`
+        : "All dates";
 
   return (
     <div>
@@ -196,7 +221,7 @@ export default function LogsPage() {
               <h2 style={{ fontSize: "1.2rem", margin: 0 }}>
                 {canManage ? "Team Logs" : "Your Past Logs"}
               </h2>
-              <div style={{ display: "flex", gap: "12px" }}>
+              <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", justifyContent: "flex-end" }}>
                 {canManage && (
                   <input 
                     placeholder="Search employee..." 
@@ -205,13 +230,60 @@ export default function LogsPage() {
                     style={{ padding: "8px 12px", fontSize: "0.85rem", width: "180px" }}
                   />
                 )}
-                <input 
-                  type="date" 
-                  value={filterDate}
-                  onChange={e => setFilterDate(e.target.value)}
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+                  From
+                  <input
+                    type="date"
+                    value={filterFrom}
+                    onChange={e => setFilterFrom(e.target.value)}
+                    style={{ padding: "8px 12px", fontSize: "0.85rem" }}
+                  />
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+                  To
+                  <input
+                    type="date"
+                    value={filterTo}
+                    onChange={e => setFilterTo(e.target.value)}
+                    style={{ padding: "8px 12px", fontSize: "0.85rem" }}
+                  />
+                </label>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ padding: "8px 12px", fontSize: "0.85rem" }}
+                    onClick={() => {
+                      setFilterFrom(today);
+                      setFilterTo(today);
+                    }}
+                  >
+                    Today
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn-secondary"
                   style={{ padding: "8px 12px", fontSize: "0.85rem" }}
-                />
+                  onClick={() => {
+                    setFilterName("");
+                    setFilterFrom("");
+                    setFilterTo("");
+                  }}
+                >
+                  Clear
+                </button>
               </div>
+            </div>
+            <div className="flex justify-between items-center mb-4" style={{ gap: "12px", flexWrap: "wrap" }}>
+              <p className="text-muted" style={{ margin: 0, fontSize: "0.9rem" }}>
+                Showing {filteredLogs.length} {filteredLogs.length === 1 ? "log" : "logs"} · {dateRangeLabel}
+              </p>
+              {hasInvalidDateRange && (
+                <span style={{ color: "var(--danger-color)", fontSize: "0.85rem", fontWeight: 500 }}>
+                  From date must be before To date.
+                </span>
+              )}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               {filteredLogs.map(log => (

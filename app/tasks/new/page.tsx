@@ -24,6 +24,15 @@ function NewTaskForm() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
+  const selectedProject = projects.find(project => project.id === Number(projectId));
+  const selectedProjectMemberIds = new Set<number>([
+    ...(selectedProject?.assignedEmployees?.map(employee => employee.id) ?? []),
+    ...(selectedProject?.managerId ? [selectedProject.managerId] : [])
+  ]);
+  const assignableUsers = users.filter(user => (
+    (user.role === "EMPLOYEE" || user.role === "MANAGER") &&
+    selectedProjectMemberIds.has(user.id)
+  ));
 
   useEffect(() => {
     async function loadData() {
@@ -39,6 +48,12 @@ function NewTaskForm() {
       loadData();
     }
   }, [authLoading, toast]);
+
+  useEffect(() => {
+    if (assignedToId && !assignableUsers.some(user => user.id === assignedToId)) {
+      setAssignedToId("");
+    }
+  }, [assignedToId, assignableUsers]);
 
   if (authLoading) return <div className="p-8">Verifying access...</div>;
 
@@ -115,7 +130,10 @@ function NewTaskForm() {
               <label style={{ display: "block", marginBottom: "8px", fontWeight: 500, fontSize: "0.9rem" }}>Project *</label>
               <select
                 value={projectId}
-                onChange={(e) => setProjectId(e.target.value === "" ? "" : Number(e.target.value))}
+                onChange={(e) => {
+                  setProjectId(e.target.value === "" ? "" : Number(e.target.value));
+                  setAssignedToId("");
+                }}
                 style={{ width: "100%" }}
                 required
               >
@@ -133,9 +151,16 @@ function NewTaskForm() {
                 onChange={(e) => setAssignedToId(e.target.value === "" ? "" : Number(e.target.value))}
                 style={{ width: "100%" }}
                 required
+                disabled={!projectId || assignableUsers.length === 0}
               >
-                <option value="">Select an employee</option>
-                {users.map(u => (
+                <option value="">
+                  {!projectId
+                    ? "Select a project first"
+                    : assignableUsers.length === 0
+                      ? "No assigned employees or managers"
+                      : "Select an employee or manager"}
+                </option>
+                {assignableUsers.map(u => (
                   <option key={u.id} value={u.id}>{u.fullName} ({u.role})</option>
                 ))}
               </select>

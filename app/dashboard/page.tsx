@@ -109,12 +109,19 @@ export default function DashboardPage() {
   }, [canManage, myTasks, projects, teamTasks, users]);
 
   const projectTeamMembers = useMemo(() => {
-    if (!taskProjectId) return users;
+    const assignableUsers = users.filter(user => user.role === "EMPLOYEE" || user.role === "MANAGER");
+    if (!taskProjectId) return assignableUsers;
     const project = projects.find(p => p.id === Number(taskProjectId));
-    if (!project || !project.assignedEmployees || project.assignedEmployees.length === 0) {
-      return users; // Fallback to all users if no assignments yet or project not found
+    if (!project) {
+      return assignableUsers;
     }
-    return project.assignedEmployees;
+    const projectManager = assignableUsers.find(user => user.id === project.managerId);
+    const assignedMembers = project.assignedEmployees ?? [];
+    const members = [
+      ...(projectManager ? [projectManager] : []),
+      ...assignedMembers,
+    ];
+    return Array.from(new Map(members.map(member => [member.id, member])).values());
   }, [taskProjectId, projects, users]);
 
   async function loadData() {
@@ -372,7 +379,7 @@ export default function DashboardPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                   <select value={projectManagerId} onChange={e => setProjectManagerId(e.target.value ? Number(e.target.value) : "")} required>
                     <option value="">Select Manager</option>
-                    {users.filter(u => u.role !== "EMPLOYEE").map(u => <option key={u.id} value={u.id}>{u.fullName}</option>)}
+                    {users.filter(u => u.role === "MANAGER").map(u => <option key={u.id} value={u.id}>{u.fullName}</option>)}
                   </select>
                   <div style={{ position: "relative" }}>
                     <select 

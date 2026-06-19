@@ -361,10 +361,8 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
   const canAddNotes = myMembership?.canAddNotes ?? false;
   const activeTaskCount = projectTasks.filter(task => task.status !== "DONE").length;
   const boardNameByStatus = Object.fromEntries(taskBoards.map(board => [board.statusKey, board.name]));
-  const taskAssignees = [
-    { id: project.managerId, fullName: project.managerName },
-    ...project.assignedEmployees,
-  ].filter((member, index, list) => list.findIndex(item => item.id === member.id) === index);
+  const taskAssignees = project.assignedEmployees
+    .filter((member, index, list) => list.findIndex(item => item.id === member.id) === index);
 
   function decodeNote(content: string): {
     category: NoteCategory;
