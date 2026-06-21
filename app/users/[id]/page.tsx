@@ -44,6 +44,7 @@ const formatDate = (value?: string | null) => value
 const formatDateTime = (value?: string | null) => value
   ? new Intl.DateTimeFormat("en", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
   : "In progress";
+const formatLastLogin = (value?: string | null) => value ? formatDateTime(value) : "Never logged in";
 const formatHours = (value: number | null) => value == null ? "Active" : `${Number(value).toFixed(2)}h`;
 const formatBytes = (bytes: number) => {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -443,6 +444,10 @@ export default function StaffRecordPage() {
               <div>
                 <span>Last attendance</span>
                 <strong>{formatDate(summary.lastAttendanceAt)}</strong>
+              </div>
+              <div>
+                <span>Last login</span>
+                <strong>{formatLastLogin(staff.lastLoginAt)}</strong>
               </div>
               <div>
                 <span>Latest DSU</span>

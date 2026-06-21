@@ -158,6 +158,14 @@
   background: rgba(45, 212, 191, 0.035);
 }
 
+.staff-last-login {
+  display: block;
+  min-width: 126px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
 .staff-person {
   display: flex;
   align-items: center;
@@ -2755,6 +2763,10 @@ h1, h2, h3, h4 {
 .profile-form-grid input:disabled {
   color: #64748b;
   background: rgba(15, 23, 42, 0.42);
+}
+
+.profile-readonly-grid {
+  margin-top: 4px;
 }
 
 .profile-form-actions {

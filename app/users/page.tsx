@@ -17,6 +17,9 @@ const roleLabel = (role: Role) => role.charAt(0) + role.slice(1).toLowerCase();
 const titleCase = (value: string) => value.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, char => char.toUpperCase());
 const accountStatusLabel = (status: AccountStatus) => titleCase(status);
 const initials = (name: string) => name.split(" ").filter(Boolean).map(part => part[0]).join("").slice(0, 2).toUpperCase();
+const formatLastLogin = (value: string | null) => value
+  ? new Intl.DateTimeFormat("en", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
+  : "Never logged in";
 
 export default function UsersAdminPage() {
   const { loading: authLoading } = useAuth(["ADMIN"]);
@@ -262,13 +265,13 @@ export default function UsersAdminPage() {
         <div className="staff-table-wrap">
           <table className="staff-table">
             <thead>
-              <tr><th>Staff member</th><th>Job title</th><th>Role</th><th>Onboarding</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
+              <tr><th>Staff member</th><th>Job title</th><th>Role</th><th>Onboarding</th><th>Last login</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="staff-empty">Loading staff...</td></tr>
+                <tr><td colSpan={7} className="staff-empty">Loading staff...</td></tr>
               ) : visibleUsers.length === 0 ? (
-                <tr><td colSpan={6} className="staff-empty">No staff match these filters.</td></tr>
+                <tr><td colSpan={7} className="staff-empty">No staff match these filters.</td></tr>
               ) : visibleUsers.map(user => (
                 <tr key={user.id}>
                   <td>
@@ -287,6 +290,7 @@ export default function UsersAdminPage() {
                   <td><span className="staff-job-title">{user.jobTitle || "Not assigned"}{user.employeeId ? ` · ${user.employeeId}` : ""}</span></td>
                   <td><span className={`staff-role staff-role-${user.role.toLowerCase()}`}>{roleLabel(user.role)}</span></td>
                   <td><span className={`staff-status ${user.accountStatus === "VERIFIED" ? "active" : "inactive"}`}><i aria-hidden="true" />{accountStatusLabel(user.accountStatus)}</span></td>
+                  <td><span className="staff-last-login">{formatLastLogin(user.lastLoginAt)}</span></td>
                   <td><span className={`staff-status ${user.active ? "active" : "inactive"}`}><i aria-hidden="true" />{user.active ? "Active" : "Inactive"}</span></td>
                   <td>
                     <div className="staff-row-actions">

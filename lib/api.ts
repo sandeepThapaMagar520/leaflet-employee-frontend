@@ -46,9 +46,14 @@ export type Profile = {
   role: Role;
   active: boolean;
   profilePhotoUrl: string | null;
+  employeeId: string | null;
+  joiningDate: string | null;
+  employmentType: EmploymentType;
   phone: string | null;
+  emergencyContact: string | null;
   jobTitle: string | null;
   department: string | null;
+  location: string | null;
   timezone: string;
   emailVerified: boolean;
   mustChangePassword: boolean;
@@ -469,6 +474,8 @@ export async function getMyProfile() {
 export async function updateMyProfile(payload: {
   fullName?: string;
   phone?: string;
+  emergencyContact?: string;
+  location?: string;
   timezone?: string;
   profilePhotoUrl?: string;
 }) {

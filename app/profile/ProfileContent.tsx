@@ -46,6 +46,10 @@ function initials(name: string) {
   return name.split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase();
 }
 
+function titleCase(value: string) {
+  return value.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, char => char.toUpperCase());
+}
+
 function formatDateTime(value: string | null) {
   if (!value) return "—";
   return new Date(value).toLocaleString();
@@ -72,6 +76,9 @@ export default function ProfileContent() {
 
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
+  const [emergencyContact, setEmergencyContact] = useState("");
+  const [location, setLocation] = useState("");
+  const [timezone, setTimezone] = useState("Asia/Kathmandu");
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -130,6 +137,9 @@ export default function ProfileContent() {
         setLogs(logList);
         setFullName(profileData.fullName);
         setPhone(profileData.phone ?? "");
+        setEmergencyContact(profileData.emergencyContact ?? "");
+        setLocation(profileData.location ?? "");
+        setTimezone(profileData.timezone ?? "Asia/Kathmandu");
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to load profile");
       } finally {
@@ -175,6 +185,9 @@ export default function ProfileContent() {
       const updated = await updateMyProfile({
         fullName: fullName.trim(),
         phone: phone.trim(),
+        emergencyContact: emergencyContact.trim(),
+        location: location.trim(),
+        timezone: timezone.trim(),
       });
       setProfile(updated);
       const raw = localStorage.getItem("auth_user");
@@ -346,6 +359,14 @@ export default function ProfileContent() {
               <span>Job title</span>
               <strong>{profile.jobTitle || "Not set"}</strong>
             </div>
+            <div>
+              <span>Department</span>
+              <strong>{profile.department || "Not set"}</strong>
+            </div>
+            <div>
+              <span>Location</span>
+              <strong>{profile.location || "Not set"}</strong>
+            </div>
           </div>
         </div>
       </header>
@@ -429,9 +450,16 @@ export default function ProfileContent() {
                     <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+977 98XXXXXXXX" />
                   </label>
                   <label>
-                    <span>Job title</span>
-                    <input value={profile.jobTitle || "Not set"} disabled />
-                    <small className="text-muted">Job titles are managed by an administrator.</small>
+                    <span>Emergency contact</span>
+                    <input value={emergencyContact} onChange={e => setEmergencyContact(e.target.value)} placeholder="Name / phone number" />
+                  </label>
+                  <label>
+                    <span>Current location</span>
+                    <input value={location} onChange={e => setLocation(e.target.value)} placeholder="Kathmandu" />
+                  </label>
+                  <label>
+                    <span>Timezone</span>
+                    <input value={timezone} onChange={e => setTimezone(e.target.value)} placeholder="Asia/Kathmandu" required />
                   </label>
                 </div>
                 <div className="profile-form-actions">
@@ -440,6 +468,21 @@ export default function ProfileContent() {
                   </button>
                 </div>
               </form>
+
+              <div className="profile-divider" />
+              <div className="profile-section-heading compact">
+                <div>
+                  <h3>Employment details</h3>
+                  <p>These records are managed by an administrator.</p>
+                </div>
+              </div>
+              <div className="profile-form-grid profile-readonly-grid">
+                <label><span>Employee ID</span><input value={profile.employeeId || "Not set"} disabled /></label>
+                <label><span>Joining date</span><input value={profile.joiningDate || "Not set"} disabled /></label>
+                <label><span>Employment type</span><input value={titleCase(profile.employmentType)} disabled /></label>
+                <label><span>Department</span><input value={profile.department || "Not set"} disabled /></label>
+                <label><span>Job title</span><input value={profile.jobTitle || "Not set"} disabled /></label>
+              </div>
             </section>
           )}
 
