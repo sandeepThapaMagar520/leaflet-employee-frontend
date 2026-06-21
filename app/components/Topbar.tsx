@@ -1,29 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import NotificationBell from "./NotificationBell";
 import ProfileMenu from "./ProfileMenu";
-
-type StoredUser = {
-  fullName: string;
-  role: string;
-};
+import { useAuth } from "@/lib/hooks";
 
 export default function Topbar() {
-  const [user, setUser] = useState<StoredUser | null>(null);
+  const { loading, user } = useAuth();
 
-  useEffect(() => {
-    const raw = localStorage.getItem("auth_user");
-    if (raw) {
-      try {
-        setUser(JSON.parse(raw));
-      } catch {
-        setUser(null);
-      }
-    }
-  }, []);
-
-  const portalName = user?.role === "ADMIN" || user?.role === "MANAGER" ? "Leaflet Admin" : "Leaflet Employee";
+  const portalName = loading ? "Leaflet" : user?.role === "ADMIN" || user?.role === "MANAGER" ? "Leaflet Admin" : "Leaflet Employee";
 
   return (
     <header style={{
@@ -42,7 +26,7 @@ export default function Topbar() {
       <div>
         <h3 style={{ margin: 0, fontWeight: 800 }}>{portalName}</h3>
         <p style={{ marginTop: "4px", fontSize: "0.78rem", color: "var(--text-secondary)" }}>
-          {user?.role === "ADMIN" ? "Administration and approvals" : user?.role === "MANAGER" ? "Team operations" : "Personal work overview"}
+          {loading ? "Loading workspace" : user?.role === "ADMIN" ? "Administration and approvals" : user?.role === "MANAGER" ? "Team operations" : "Personal work overview"}
         </p>
       </div>
 

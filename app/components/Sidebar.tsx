@@ -2,29 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-import { useEffect, useState } from "react";
-
-type StoredUser = {
-  fullName: string;
-  role: "ADMIN" | "MANAGER" | "EMPLOYEE";
-};
+import { useAuth } from "@/lib/hooks";
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const [userRole, setUserRole] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const raw = localStorage.getItem("auth_user");
-      if (raw) {
-        try {
-          const user = JSON.parse(raw) as StoredUser;
-          setUserRole(user.role);
-        } catch {}
-      }
-    }
-  }, []);
+  const { loading, user } = useAuth();
+  const userRole = user?.role;
 
   const links = [
     { href: "/dashboard", label: "Dashboard", icon: "📊" },
@@ -47,7 +30,7 @@ export default function Sidebar() {
     links.push({ href: "/users", label: "Staff Management", icon: "👥" });
   }
 
-  const brandName = userRole === "ADMIN" || userRole === "MANAGER" ? "Leaflet Admin" : "Leaflet Employee";
+  const brandName = loading ? "Leaflet" : userRole === "ADMIN" || userRole === "MANAGER" ? "Leaflet Admin" : "Leaflet Employee";
 
   return (
     <aside style={{

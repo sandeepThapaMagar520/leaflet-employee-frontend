@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { createDailyLog, DailyLog, getMyDailyLogs, getAllDailyLogs, downloadExport, updateDailyLog } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { useAuth } from "@/lib/hooks";
 
 function formatLocalDate(date: Date) {
   const year = date.getFullYear();
@@ -13,6 +14,7 @@ function formatLocalDate(date: Date) {
 
 export default function LogsPage() {
   const toast = useToast();
+  const { loading: authLoading, user } = useAuth(["ADMIN", "MANAGER", "EMPLOYEE"]);
   const today = formatLocalDate(new Date());
   const [logs, setLogs] = useState<DailyLog[]>([]);
   const [exporting, setExporting] = useState(false);
@@ -27,11 +29,10 @@ export default function LogsPage() {
   const [editProblemsFaced, setEditProblemsFaced] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
 
-  const authUser = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("auth_user") || "{}") : null;
-  const canManage = authUser?.role === "ADMIN" || authUser?.role === "MANAGER";
-  const isAdmin = authUser?.role === "ADMIN";
-  const [filterFrom, setFilterFrom] = useState(isAdmin ? today : "");
-  const [filterTo, setFilterTo] = useState(isAdmin ? today : "");
+  const canManage = user?.role === "ADMIN" || user?.role === "MANAGER";
+  const isAdmin = user?.role === "ADMIN";
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
   const hasInvalidDateRange = Boolean(filterFrom && filterTo && filterFrom > filterTo);
 
   async function loadData() {
@@ -47,9 +48,14 @@ export default function LogsPage() {
   }
 
   useEffect(() => {
+    if (authLoading) return;
+    if (isAdmin) {
+      setFilterFrom(today);
+      setFilterTo(today);
+    }
     void loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authLoading, isAdmin]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -139,6 +145,8 @@ export default function LogsPage() {
     : filterFrom ? `From ${filterFrom}`
       : filterTo ? `Until ${filterTo}`
         : "All dates";
+
+  if (authLoading) return <div className="p-8">Verifying access...</div>;
 
   return (
     <div>

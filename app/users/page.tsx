@@ -1,8 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { AccountStatus, deleteUser, EmploymentType, getUsersPaged, registerUser, Role, updateUser, User } from "@/lib/api";
+import { AccountStatus, deleteUser, EmploymentType, getStaffDirectorySummary, getUsersPaged, registerUser, Role, StaffDirectorySummary, updateUser, User } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import ActionModal from "@/app/components/ActionModal";
@@ -12,6 +12,8 @@ const roleOptions: Role[] = ["EMPLOYEE", "MANAGER", "ADMIN"];
 const employmentTypeOptions: EmploymentType[] = ["FULL_TIME", "PART_TIME", "CONTRACTOR", "INTERN"];
 type RoleFilter = "ALL" | Role;
 type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
+type AccountStatusFilter = "ALL" | AccountStatus;
+type EmploymentTypeFilter = "ALL" | EmploymentType;
 
 const roleLabel = (role: Role) => role.charAt(0) + role.slice(1).toLowerCase();
 const titleCase = (value: string) => value.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, char => char.toUpperCase());
@@ -33,6 +35,11 @@ export default function UsersAdminPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("ALL");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [accountStatusFilter, setAccountStatusFilter] = useState<AccountStatusFilter>("ALL");
+  const [employmentTypeFilter, setEmploymentTypeFilter] = useState<EmploymentTypeFilter>("ALL");
+  const [departmentFilter, setDepartmentFilter] = useState("ALL");
+  const [incompleteOnly, setIncompleteOnly] = useState(false);
+  const [summary, setSummary] = useState<StaffDirectorySummary>({ totalStaff: 0, activeStaff: 0, managers: 0, onboardingPending: 0, incompleteRecords: 0, departments: [] });
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -69,8 +76,19 @@ export default function UsersAdminPage() {
   async function loadData(nextPage = page) {
     setLoading(true);
     try {
-      const result = await getUsersPaged(nextPage, 15, searchQuery);
+      const [result, summaryResult] = await Promise.all([
+        getUsersPaged(nextPage, 15, searchQuery, {
+          role: roleFilter === "ALL" ? undefined : roleFilter,
+          active: statusFilter === "ALL" ? undefined : statusFilter === "ACTIVE",
+          accountStatus: accountStatusFilter === "ALL" ? undefined : accountStatusFilter,
+          employmentType: employmentTypeFilter === "ALL" ? undefined : employmentTypeFilter,
+          department: departmentFilter === "ALL" ? undefined : departmentFilter,
+          incompleteOnly,
+        }),
+        getStaffDirectorySummary(),
+      ]);
       setUsers(result.content);
+      setSummary(summaryResult);
       setPage(result.page);
       setTotalPages(result.totalPages);
       setTotalElements(result.totalElements);
@@ -82,30 +100,24 @@ export default function UsersAdminPage() {
   }
 
   useEffect(() => {
-    if (!authLoading) void loadData(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading]);
-
-  useEffect(() => {
     if (authLoading) return;
     const timer = window.setTimeout(() => void loadData(0), 300);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery]);
+  }, [accountStatusFilter, authLoading, departmentFilter, employmentTypeFilter, incompleteOnly, roleFilter, searchQuery, statusFilter]);
 
-  const visibleUsers = useMemo(
-    () => users.filter(user =>
-      (roleFilter === "ALL" || user.role === roleFilter)
-      && (statusFilter === "ALL" || (statusFilter === "ACTIVE" ? user.active : !user.active))
-    ),
-    [roleFilter, statusFilter, users]
-  );
+  const hasActiveFilters = roleFilter !== "ALL" || statusFilter !== "ALL" || accountStatusFilter !== "ALL"
+    || employmentTypeFilter !== "ALL" || departmentFilter !== "ALL" || incompleteOnly || searchQuery.trim() !== "";
 
-  const metrics = useMemo(() => ({
-    active: users.filter(user => user.active).length,
-    managers: users.filter(user => user.role === "MANAGER").length,
-    pending: users.filter(user => user.accountStatus !== "VERIFIED").length,
-  }), [users]);
+  function clearFilters() {
+    setSearchQuery("");
+    setRoleFilter("ALL");
+    setStatusFilter("ALL");
+    setAccountStatusFilter("ALL");
+    setEmploymentTypeFilter("ALL");
+    setDepartmentFilter("ALL");
+    setIncompleteOnly(false);
+  }
 
   function closePanel() {
     if (submitting || savingEdit) return;
@@ -233,17 +245,18 @@ export default function UsersAdminPage() {
       </header>
 
       <section className="staff-metrics" aria-label="Staff summary">
-        <div><span>Total staff</span><strong>{totalElements}</strong></div>
-        <div><span>Active on this page</span><strong>{metrics.active}</strong></div>
-        <div><span>Managers</span><strong>{metrics.managers}</strong></div>
-        <div><span>Onboarding pending</span><strong>{metrics.pending}</strong></div>
+        <div><span>Total staff</span><strong>{summary.totalStaff}</strong></div>
+        <div><span>Active staff</span><strong>{summary.activeStaff}</strong></div>
+        <div><span>Managers</span><strong>{summary.managers}</strong></div>
+        <div><span>Onboarding pending</span><strong>{summary.onboardingPending}</strong></div>
+        <div><span>Incomplete records</span><strong>{summary.incompleteRecords}</strong></div>
       </section>
 
       <section className="staff-directory">
         <div className="staff-toolbar">
           <div>
             <h2>Staff directory</h2>
-            <p>{totalElements} people across all roles</p>
+            <p>{totalElements} matching staff member{totalElements === 1 ? "" : "s"}</p>
           </div>
           <div className="staff-toolbar-controls">
             <label className="staff-search">
@@ -259,6 +272,25 @@ export default function UsersAdminPage() {
               <option value="ACTIVE">Active</option>
               <option value="INACTIVE">Inactive</option>
             </select>
+            <select aria-label="Filter by onboarding" value={accountStatusFilter} onChange={event => setAccountStatusFilter(event.target.value as AccountStatusFilter)}>
+              <option value="ALL">All onboarding</option>
+              <option value="INVITE_SENT">Invite sent</option>
+              <option value="SETUP_PENDING">Setup pending</option>
+              <option value="VERIFIED">Verified</option>
+            </select>
+            <select aria-label="Filter by employment type" value={employmentTypeFilter} onChange={event => setEmploymentTypeFilter(event.target.value as EmploymentTypeFilter)}>
+              <option value="ALL">All employment</option>
+              {employmentTypeOptions.map(option => <option key={option} value={option}>{titleCase(option)}</option>)}
+            </select>
+            <select aria-label="Filter by department" value={departmentFilter} onChange={event => setDepartmentFilter(event.target.value)}>
+              <option value="ALL">All departments</option>
+              {summary.departments.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+            <select aria-label="Filter by data quality" value={incompleteOnly ? "INCOMPLETE" : "ALL"} onChange={event => setIncompleteOnly(event.target.value === "INCOMPLETE")}>
+              <option value="ALL">All records</option>
+              <option value="INCOMPLETE">Incomplete records</option>
+            </select>
+            {hasActiveFilters && <button type="button" className="staff-clear-filters" onClick={clearFilters}>Reset</button>}
           </div>
         </div>
 
@@ -270,9 +302,9 @@ export default function UsersAdminPage() {
             <tbody>
               {loading ? (
                 <tr><td colSpan={7} className="staff-empty">Loading staff...</td></tr>
-              ) : visibleUsers.length === 0 ? (
+              ) : users.length === 0 ? (
                 <tr><td colSpan={7} className="staff-empty">No staff match these filters.</td></tr>
-              ) : visibleUsers.map(user => (
+              ) : users.map(user => (
                 <tr key={user.id}>
                   <td>
                     <Link className="staff-person staff-person-link" href={`/users/${user.id}`} aria-label={`View ${user.fullName}'s records`}>

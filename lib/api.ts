@@ -101,6 +101,15 @@ export type PageResponse<T> = {
   totalPages: number;
 };
 
+export type StaffDirectorySummary = {
+  totalStaff: number;
+  activeStaff: number;
+  managers: number;
+  onboardingPending: number;
+  incompleteRecords: number;
+  departments: string[];
+};
+
 export type NotificationType =
   | "TASK_ASSIGNED"
   | "TASK_COMPLETED"
@@ -500,10 +509,27 @@ export async function getUsers() {
   return request<User[]>("/users");
 }
 
-export async function getUsersPaged(page = 0, size = 20, search = "") {
+export async function getUsersPaged(page = 0, size = 20, search = "", filters: {
+  role?: Role;
+  active?: boolean;
+  accountStatus?: AccountStatus;
+  employmentType?: EmploymentType;
+  department?: string;
+  incompleteOnly?: boolean;
+} = {}) {
   const params = new URLSearchParams({ page: String(page), size: String(size) });
   if (search.trim()) params.set("search", search.trim());
+  if (filters.role) params.set("role", filters.role);
+  if (filters.active !== undefined) params.set("active", String(filters.active));
+  if (filters.accountStatus) params.set("accountStatus", filters.accountStatus);
+  if (filters.employmentType) params.set("employmentType", filters.employmentType);
+  if (filters.department) params.set("department", filters.department);
+  if (filters.incompleteOnly) params.set("incompleteOnly", "true");
   return request<PageResponse<User>>(`/users?${params.toString()}`);
+}
+
+export async function getStaffDirectorySummary() {
+  return request<StaffDirectorySummary>("/users/summary");
 }
 
 export async function getStaffOverview(id: number) {
