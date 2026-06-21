@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
-import { createDailyLog, DailyLog, getMyDailyLogs, getAllDailyLogs, downloadExport, updateDailyLog } from "@/lib/api";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { createDailyLog, DailyLog, getMyDailyLogs, getAllDailyLogs, downloadExport, getUsers, updateDailyLog, User } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { useAuth } from "@/lib/hooks";
 
@@ -17,6 +17,7 @@ export default function LogsPage() {
   const { loading: authLoading, user } = useAuth(["ADMIN", "MANAGER", "EMPLOYEE"]);
   const today = formatLocalDate(new Date());
   const [logs, setLogs] = useState<DailyLog[]>([]);
+  const [staff, setStaff] = useState<User[]>([]);
   const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -24,6 +25,7 @@ export default function LogsPage() {
   const [summary, setSummary] = useState("");
   const [problemsFaced, setProblemsFaced] = useState("");
   const [filterName, setFilterName] = useState("");
+  const [reviewMode, setReviewMode] = useState<"ALL" | "BLOCKERS">("ALL");
   const [editingLog, setEditingLog] = useState<DailyLog | null>(null);
   const [editSummary, setEditSummary] = useState("");
   const [editProblemsFaced, setEditProblemsFaced] = useState("");
@@ -38,8 +40,14 @@ export default function LogsPage() {
   async function loadData() {
     try {
       setLoading(true);
-      const data = canManage ? await getAllDailyLogs() : await getMyDailyLogs();
-      setLogs(data);
+      if (canManage) {
+        const [data, userList] = await Promise.all([getAllDailyLogs(), getUsers()]);
+        setLogs(data);
+        setStaff(userList.filter(member => member.active && member.role !== "ADMIN"));
+      } else {
+        setLogs(await getMyDailyLogs());
+        setStaff([]);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load daily logs");
     } finally {
@@ -49,13 +57,13 @@ export default function LogsPage() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (isAdmin) {
+    if (canManage) {
       setFilterFrom(today);
       setFilterTo(today);
     }
     void loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, isAdmin]);
+  }, [authLoading, canManage]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -137,8 +145,21 @@ export default function LogsPage() {
     const matchesName = log.userFullName.toLowerCase().includes(filterName.toLowerCase());
     const matchesFrom = filterFrom ? log.logDate >= filterFrom : true;
     const matchesTo = filterTo ? log.logDate <= filterTo : true;
-    return matchesName && matchesFrom && matchesTo;
+    const matchesReviewMode = reviewMode === "ALL" || Boolean(log.problemsFaced?.trim());
+    return matchesName && matchesFrom && matchesTo && matchesReviewMode;
   });
+
+  const dailyCompliance = useMemo(() => {
+    if (!canManage || !filterFrom || filterFrom !== filterTo) return null;
+    const logsForDay = logs.filter(log => log.logDate === filterFrom);
+    const submittedIds = new Set(logsForDay.map(log => log.userId));
+    return {
+      submitted: submittedIds.size,
+      missing: staff.filter(member => !submittedIds.has(member.id)),
+      blockers: logsForDay.filter(log => Boolean(log.problemsFaced?.trim())).length,
+      expected: staff.length,
+    };
+  }, [canManage, filterFrom, filterTo, logs, staff]);
 
   const dateRangeLabel = filterFrom && filterTo
     ? filterFrom === filterTo ? filterFrom : `${filterFrom} to ${filterTo}`
@@ -165,6 +186,24 @@ export default function LogsPage() {
       {loading ? (
         <div style={{ display: "flex", justifyContent: "center", marginTop: "40px" }}>Loading logs...</div>
       ) : (
+        <div className="logs-workflow">
+          {canManage && dailyCompliance && (
+            <section className="logs-compliance" aria-label="Daily log compliance">
+              <button type="button" className={reviewMode === "ALL" ? "active" : ""} onClick={() => setReviewMode("ALL")}><span>Submitted</span><strong>{dailyCompliance.submitted}</strong><small>of {dailyCompliance.expected} expected</small></button>
+              <div><span>Missing</span><strong>{dailyCompliance.missing.length}</strong><small>Not submitted</small></div>
+              <button type="button" className={reviewMode === "BLOCKERS" ? "active warning" : "warning"} onClick={() => setReviewMode(reviewMode === "BLOCKERS" ? "ALL" : "BLOCKERS")}><span>With blockers</span><strong>{dailyCompliance.blockers}</strong><small>Needs follow-up</small></button>
+            </section>
+          )}
+
+          {canManage && dailyCompliance && dailyCompliance.missing.length > 0 && (
+            <section className="logs-missing-panel">
+              <div><h2>Missing submissions</h2><p>Staff without a daily log for {filterFrom}</p></div>
+              <div>{dailyCompliance.missing.map(member => (
+                <span key={member.id}>{member.fullName} · {member.employeeId || member.email}</span>
+              ))}</div>
+            </section>
+          )}
+
         <div style={{ 
           display: "grid", 
           gridTemplateColumns: isAdmin ? "1fr" : "minmax(300px, 1fr) minmax(400px, 2fr)", 
@@ -238,6 +277,12 @@ export default function LogsPage() {
                     style={{ padding: "8px 12px", fontSize: "0.85rem", width: "180px" }}
                   />
                 )}
+                {canManage && (
+                  <select aria-label="Filter daily logs by review status" value={reviewMode} onChange={event => setReviewMode(event.target.value as "ALL" | "BLOCKERS")} style={{ padding: "8px 12px", fontSize: "0.85rem" }}>
+                    <option value="ALL">All submissions</option>
+                    <option value="BLOCKERS">With blockers</option>
+                  </select>
+                )}
                 <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.8rem", color: "var(--text-secondary)" }}>
                   From
                   <input
@@ -277,6 +322,7 @@ export default function LogsPage() {
                     setFilterName("");
                     setFilterFrom("");
                     setFilterTo("");
+                    setReviewMode("ALL");
                   }}
                 >
                   Clear
@@ -334,6 +380,7 @@ export default function LogsPage() {
             </div>
           </div>
 
+        </div>
         </div>
       )}
     </div>

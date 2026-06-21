@@ -15,10 +15,9 @@ import {
   startAttendanceSession,
 } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { useAuth } from "@/lib/hooks";
 
-type AuthUser = {
-  role?: "ADMIN" | "MANAGER" | "EMPLOYEE";
-};
+type AttendanceFilter = "ALL" | "EXCEPTIONS" | "COMPLETED_ANY" | AttendanceDaySummary["status"];
 
 const statusLabels: Record<AttendanceDaySummary["status"], string> = {
   NO_ACTIVITY: "No activity",
@@ -72,6 +71,7 @@ function formatDuration(minutes: number) {
 
 export default function AttendancePage() {
   const toast = useToast();
+  const { loading: authLoading, user } = useAuth(["ADMIN", "MANAGER", "EMPLOYEE"]);
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [todaySummary, setTodaySummary] = useState<AttendanceDaySummary | null>(null);
   const [teamSummaries, setTeamSummaries] = useState<AttendanceDaySummary[]>([]);
@@ -81,11 +81,10 @@ export default function AttendancePage() {
   const [exporting, setExporting] = useState(false);
   const [filterName, setFilterName] = useState("");
   const [filterDate, setFilterDate] = useState(todayIsoDate());
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
-  const [authLoaded, setAuthLoaded] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<AttendanceFilter>("EXCEPTIONS");
 
-  const canManage = authUser?.role === "ADMIN" || authUser?.role === "MANAGER";
-  const isAdmin = authUser?.role === "ADMIN";
+  const canManage = user?.role === "ADMIN" || user?.role === "MANAGER";
+  const isAdmin = user?.role === "ADMIN";
 
   async function loadData(date = filterDate) {
     try {
@@ -108,27 +107,10 @@ export default function AttendancePage() {
   }
 
   useEffect(() => {
-    try {
-      const storedUser = localStorage.getItem("auth_user");
-      setAuthUser(storedUser ? JSON.parse(storedUser) : null);
-    } catch {
-      setAuthUser(null);
-    }
-    setAuthLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (!authLoaded) return;
-    void loadData();
+    if (authLoading) return;
+    void loadData(filterDate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoaded, authUser?.role]);
-
-  useEffect(() => {
-    if (authLoaded && canManage) {
-      void loadData(filterDate);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterDate, authLoaded]);
+  }, [authLoading, canManage, filterDate, user?.role]);
 
   async function handleStart() {
     try {
@@ -177,9 +159,21 @@ export default function AttendancePage() {
     return source.filter(session => (filterDate ? localIsoDate(session.startTime) === filterDate : true));
   }, [canManage, filterDate, sessions]);
 
-  const filteredTeamSummaries = teamSummaries.filter(summary =>
-    summary.userFullName.toLowerCase().includes(filterName.toLowerCase())
-  );
+  const attendanceMetrics = useMemo(() => ({
+    noActivity: teamSummaries.filter(summary => summary.status === "NO_ACTIVITY").length,
+    inProgress: teamSummaries.filter(summary => summary.status === "IN_PROGRESS").length,
+    underHours: teamSummaries.filter(summary => summary.status === "UNDER_HOURS").length,
+    completed: teamSummaries.filter(summary => summary.status === "COMPLETED" || summary.status === "COMPLETED_WITH_GRACE").length,
+  }), [teamSummaries]);
+
+  const filteredTeamSummaries = teamSummaries.filter(summary => {
+    const matchesName = summary.userFullName.toLowerCase().includes(filterName.toLowerCase());
+    const matchesStatus = statusFilter === "ALL"
+      || (statusFilter === "EXCEPTIONS" ? summary.status === "NO_ACTIVITY" || summary.status === "UNDER_HOURS" : summary.status === statusFilter);
+    const matchesCombinedCompleted = statusFilter === "COMPLETED_ANY"
+      && (summary.status === "COMPLETED" || summary.status === "COMPLETED_WITH_GRACE");
+    return matchesName && (matchesStatus || matchesCombinedCompleted);
+  });
 
   const progressPercent = todaySummary
     ? Math.min((todaySummary.totalMinutes / todaySummary.requiredMinutes) * 100, 100)
@@ -199,7 +193,7 @@ export default function AttendancePage() {
         </button>
       </div>
 
-      {!authLoaded || loading ? (
+      {authLoading || loading ? (
         <div style={{ display: "flex", justifyContent: "center", marginTop: "40px" }}>Loading attendance...</div>
       ) : (
         <div style={{ display: "grid", gap: "24px" }}>
@@ -265,10 +259,18 @@ export default function AttendancePage() {
           )}
 
           {canManage && (
-            <div className="glass-card">
-              <div className="flex justify-between items-center mb-6">
-                <h2 style={{ fontSize: "1.2rem", margin: 0 }}>Daily Team Summary</h2>
-                <div style={{ display: "flex", gap: "12px" }}>
+            <div className="attendance-team-workflow">
+              <section className="attendance-metrics" aria-label="Daily attendance summary">
+                <button type="button" className={statusFilter === "NO_ACTIVITY" ? "active" : ""} onClick={() => setStatusFilter("NO_ACTIVITY")}><span>No activity</span><strong>{attendanceMetrics.noActivity}</strong><small>Needs review</small></button>
+                <button type="button" className={statusFilter === "IN_PROGRESS" ? "active" : ""} onClick={() => setStatusFilter("IN_PROGRESS")}><span>Working now</span><strong>{attendanceMetrics.inProgress}</strong><small>Active sessions</small></button>
+                <button type="button" className={statusFilter === "UNDER_HOURS" ? "active" : ""} onClick={() => setStatusFilter("UNDER_HOURS")}><span>Under hours</span><strong>{attendanceMetrics.underHours}</strong><small>Below grace mark</small></button>
+                <button type="button" className={statusFilter === "COMPLETED_ANY" ? "active" : ""} onClick={() => setStatusFilter("COMPLETED_ANY")}><span>Completed</span><strong>{attendanceMetrics.completed}</strong><small>Target or grace met</small></button>
+              </section>
+
+              <div className="glass-card">
+                <div className="attendance-team-header">
+                  <div><h2>Daily Team Summary</h2><p>{filteredTeamSummaries.length} of {teamSummaries.length} staff shown</p></div>
+                  <div className="attendance-team-filters">
                   <input
                     placeholder="Search employee..."
                     value={filterName}
@@ -281,6 +283,16 @@ export default function AttendancePage() {
                     onChange={e => setFilterDate(e.target.value)}
                     style={{ padding: "8px 12px", fontSize: "0.85rem" }}
                   />
+                  <select aria-label="Filter attendance status" value={statusFilter} onChange={event => setStatusFilter(event.target.value as AttendanceFilter)}>
+                    <option value="EXCEPTIONS">Exceptions first</option>
+                    <option value="ALL">All statuses</option>
+                    <option value="NO_ACTIVITY">No activity</option>
+                    <option value="IN_PROGRESS">In progress</option>
+                    <option value="UNDER_HOURS">Under hours</option>
+                    <option value="COMPLETED_ANY">Any completion</option>
+                    <option value="COMPLETED_WITH_GRACE">Completed with grace</option>
+                    <option value="COMPLETED">Completed</option>
+                  </select>
                 </div>
               </div>
               <Table>
@@ -312,6 +324,7 @@ export default function AttendancePage() {
                   {filteredTeamSummaries.length === 0 && <EmptyRow colSpan={6} label="No team attendance found." />}
                 </tbody>
               </Table>
+              </div>
             </div>
           )}
 

@@ -20,6 +20,22 @@ import { useToast } from "@/lib/toast";
 const leaveTypes: LeaveType[] = ["ANNUAL", "SICK", "PERSONAL", "UNPAID"];
 const statusOptions: Array<LeaveStatus | "ALL"> = ["ALL", "PENDING", "APPROVED", "REJECTED", "CANCELLED"];
 
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(`${value}T00:00:00`));
+}
+
+function requestedDaysBetween(start: string, end: string) {
+  if (!start || !end || end < start) return 0;
+  return Math.floor((new Date(`${end}T00:00:00`).getTime() - new Date(`${start}T00:00:00`).getTime()) / 86_400_000) + 1;
+}
+
 function badgeClass(status: LeaveStatus) {
   if (status === "APPROVED") return "badge-done";
   if (status === "REJECTED") return "badge-blocked";
@@ -39,6 +55,9 @@ export default function LeavePage() {
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [statusFilter, setStatusFilter] = useState<LeaveStatus | "ALL">("ALL");
+  const [typeFilter, setTypeFilter] = useState<LeaveType | "ALL">("ALL");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [nameFilter, setNameFilter] = useState("");
   const [reviewTarget, setReviewTarget] = useState<{ id: number; action: "approve" | "reject" } | null>(null);
   const [reviewNote, setReviewNote] = useState("");
@@ -62,13 +81,20 @@ export default function LeavePage() {
   }
 
   useEffect(() => {
-    if (!authLoading) void loadData();
+    if (!authLoading) {
+      if (canReview) setStatusFilter("PENDING");
+      void loadData();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading]);
+  }, [authLoading, canReview]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!startDate || !endDate || !reason.trim()) return;
+    if (endDate < startDate) {
+      toast.error("End date must be on or after the start date.");
+      return;
+    }
     setSubmitting(true);
     try {
       await createLeaveRequest({ leaveType, startDate, endDate, reason: reason.trim() });
@@ -121,12 +147,53 @@ export default function LeavePage() {
   }
 
   const filteredRequests = useMemo(() => {
-    return requests.filter(request => {
-      const matchesStatus = statusFilter === "ALL" || request.status === statusFilter;
-      const matchesName = request.userFullName.toLowerCase().includes(nameFilter.toLowerCase());
-      return matchesStatus && matchesName;
-    });
-  }, [nameFilter, requests, statusFilter]);
+    return requests
+      .filter(request => {
+        const matchesStatus = statusFilter === "ALL" || request.status === statusFilter;
+        const matchesType = typeFilter === "ALL" || request.leaveType === typeFilter;
+        const matchesName = request.userFullName.toLowerCase().includes(nameFilter.toLowerCase());
+        const overlapsFrom = dateFrom ? request.endDate >= dateFrom : true;
+        const overlapsTo = dateTo ? request.startDate <= dateTo : true;
+        return matchesStatus && matchesType && matchesName && overlapsFrom && overlapsTo;
+      })
+      .sort((a, b) => {
+        if (a.status === "PENDING" && b.status !== "PENDING") return -1;
+        if (b.status === "PENDING" && a.status !== "PENDING") return 1;
+        return a.startDate.localeCompare(b.startDate);
+      });
+  }, [dateFrom, dateTo, nameFilter, requests, statusFilter, typeFilter]);
+
+  const leaveMetrics = useMemo(() => {
+    const today = localDateKey();
+    const nextThirtyDays = localDateKey(new Date(Date.now() + 30 * 86_400_000));
+    const approved = requests.filter(request => request.status === "APPROVED");
+    return {
+      pending: requests.filter(request => request.status === "PENDING").length,
+      awayToday: approved.filter(request => request.startDate <= today && request.endDate >= today).length,
+      upcoming: approved.filter(request => request.startDate > today && request.startDate <= nextThirtyDays).length,
+      pendingDays: requests.filter(request => request.status === "PENDING").reduce((total, request) => total + request.requestedDays, 0),
+    };
+  }, [requests]);
+
+  const plannedDays = requestedDaysBetween(startDate, endDate);
+
+  function overlapCount(request: LeaveRequest) {
+    return requests.filter(other =>
+      other.id !== request.id
+      && other.userId !== request.userId
+      && other.status === "APPROVED"
+      && other.startDate <= request.endDate
+      && other.endDate >= request.startDate
+    ).length;
+  }
+
+  function clearFilters() {
+    setNameFilter("");
+    setStatusFilter(canReview ? "PENDING" : "ALL");
+    setTypeFilter("ALL");
+    setDateFrom("");
+    setDateTo("");
+  }
 
   if (authLoading || loading) return <div className="p-8">Loading leave requests...</div>;
 
@@ -156,7 +223,16 @@ export default function LeavePage() {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: canSubmitLeave ? "minmax(280px, 420px) minmax(0, 1fr)" : "1fr", gap: "24px" }}>
+      {canReview && (
+        <section className="leave-operations-metrics" aria-label="Leave operations summary">
+          <button type="button" className={statusFilter === "PENDING" ? "active" : ""} onClick={() => setStatusFilter("PENDING")}><span>Pending review</span><strong>{leaveMetrics.pending}</strong><small>{leaveMetrics.pendingDays} requested days</small></button>
+          <button type="button" onClick={() => { setStatusFilter("APPROVED"); setDateFrom(localDateKey()); setDateTo(localDateKey()); }}><span>Away today</span><strong>{leaveMetrics.awayToday}</strong><small>Approved absence</small></button>
+          <button type="button" onClick={() => { setStatusFilter("APPROVED"); setDateFrom(localDateKey()); setDateTo(localDateKey(new Date(Date.now() + 30 * 86_400_000))); }}><span>Upcoming</span><strong>{leaveMetrics.upcoming}</strong><small>Next 30 days</small></button>
+          <button type="button" className={statusFilter === "ALL" ? "active" : ""} onClick={clearFilters}><span>All requests</span><strong>{requests.length}</strong><small>Complete history</small></button>
+        </section>
+      )}
+
+      <div className={`leave-workspace ${canSubmitLeave ? "with-form" : ""}`}>
         {canSubmitLeave && (
           <div className="glass-card" style={{ alignSelf: "start" }}>
             <h2 style={{ fontSize: "1.2rem", marginBottom: "18px" }}>New Request</h2>
@@ -177,6 +253,7 @@ export default function LeavePage() {
                   <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} required style={{ width: "100%" }} />
                 </div>
               </div>
+              {plannedDays > 0 && <p className="leave-duration-preview">Requested duration: <strong>{plannedDays} day{plannedDays === 1 ? "" : "s"}</strong></p>}
               <div>
                 <label className="text-sm text-muted block mb-2">Reason</label>
                 <textarea
@@ -196,9 +273,9 @@ export default function LeavePage() {
         )}
 
         <div className="glass-card">
-          <div className="flex justify-between items-center gap-3 flex-wrap mb-5">
-            <h2 style={{ fontSize: "1.2rem", margin: 0 }}>{canReview ? "Team Requests" : "My Requests"}</h2>
-            <div className="flex gap-3">
+          <div className="leave-review-header">
+            <div><h2>{canReview ? "Team Requests" : "My Requests"}</h2><p>{filteredRequests.length} matching request{filteredRequests.length === 1 ? "" : "s"}</p></div>
+            <div className="leave-review-filters">
               {canReview && (
                 <input
                   value={nameFilter}
@@ -210,22 +287,32 @@ export default function LeavePage() {
               <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as LeaveStatus | "ALL")}>
                 {statusOptions.map(status => <option key={status} value={status}>{status}</option>)}
               </select>
+              <select aria-label="Filter by leave type" value={typeFilter} onChange={event => setTypeFilter(event.target.value as LeaveType | "ALL")}>
+                <option value="ALL">All leave types</option>
+                {leaveTypes.map(type => <option key={type} value={type}>{type}</option>)}
+              </select>
+              {canReview && <input aria-label="Leave overlap from date" type="date" value={dateFrom} onChange={event => setDateFrom(event.target.value)} />}
+              {canReview && <input aria-label="Leave overlap to date" type="date" value={dateTo} onChange={event => setDateTo(event.target.value)} />}
+              {(nameFilter || statusFilter !== (canReview ? "PENDING" : "ALL") || typeFilter !== "ALL" || dateFrom || dateTo) && <button type="button" className="leave-reset" onClick={clearFilters}>Reset</button>}
             </div>
           </div>
 
           <div style={{ display: "grid", gap: "14px" }}>
             {filteredRequests.map(request => (
-              <div key={request.id} style={{ padding: "16px", background: "rgba(15,23,42,0.35)", border: "1px solid var(--border-color)", borderRadius: "8px" }}>
+              <div key={request.id} className={`leave-request-item ${request.status === "PENDING" ? "pending" : ""}`}>
                 <div className="flex justify-between items-start gap-3">
                   <div>
                     <div style={{ fontWeight: 700 }}>{request.leaveType} leave</div>
                     <div className="text-sm text-muted mt-1">
-                      {request.userFullName} · {new Date(request.startDate).toLocaleDateString()} to {new Date(request.endDate).toLocaleDateString()} · {request.requestedDays} day{request.requestedDays !== 1 ? "s" : ""}
+                      {request.userFullName} · {formatDate(request.startDate)} to {formatDate(request.endDate)} · {request.requestedDays} day{request.requestedDays !== 1 ? "s" : ""}
                     </div>
                   </div>
                   <span className={`badge ${badgeClass(request.status)}`}>{request.status}</span>
                 </div>
                 <p className="text-sm mt-3" style={{ lineHeight: 1.5 }}>{request.reason}</p>
+                {canReview && overlapCount(request) > 0 && (
+                  <p className="leave-overlap-warning">{overlapCount(request)} approved team absence{overlapCount(request) === 1 ? "" : "s"} overlap this request.</p>
+                )}
                 {request.reviewerNote && (
                   <p className="text-sm text-muted mt-3">Review: {request.reviewerNote}</p>
                 )}
