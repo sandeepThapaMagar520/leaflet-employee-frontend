@@ -195,6 +195,14 @@ export default function LeavePage() {
     setDateTo("");
   }
 
+  function showAllRequests() {
+    setNameFilter("");
+    setStatusFilter("ALL");
+    setTypeFilter("ALL");
+    setDateFrom("");
+    setDateTo("");
+  }
+
   if (authLoading || loading) return <div className="p-8">Loading leave requests...</div>;
 
   return (
@@ -228,7 +236,7 @@ export default function LeavePage() {
           <button type="button" className={statusFilter === "PENDING" ? "active" : ""} onClick={() => setStatusFilter("PENDING")}><span>Pending review</span><strong>{leaveMetrics.pending}</strong><small>{leaveMetrics.pendingDays} requested days</small></button>
           <button type="button" onClick={() => { setStatusFilter("APPROVED"); setDateFrom(localDateKey()); setDateTo(localDateKey()); }}><span>Away today</span><strong>{leaveMetrics.awayToday}</strong><small>Approved absence</small></button>
           <button type="button" onClick={() => { setStatusFilter("APPROVED"); setDateFrom(localDateKey()); setDateTo(localDateKey(new Date(Date.now() + 30 * 86_400_000))); }}><span>Upcoming</span><strong>{leaveMetrics.upcoming}</strong><small>Next 30 days</small></button>
-          <button type="button" className={statusFilter === "ALL" ? "active" : ""} onClick={clearFilters}><span>All requests</span><strong>{requests.length}</strong><small>Complete history</small></button>
+          <button type="button" className={statusFilter === "ALL" ? "active" : ""} onClick={showAllRequests}><span>All requests</span><strong>{requests.length}</strong><small>Complete history</small></button>
         </section>
       )}
 
