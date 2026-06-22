@@ -3402,14 +3402,29 @@ h1, h2, h3, h4 {
 }
 
 /* Daily compliance workflows */
+.attendance-page-grid {
+  min-width: 0;
+  display: grid;
+  gap: 24px;
+}
+
+.attendance-page-grid > * {
+  min-width: 0;
+}
+
 .attendance-team-workflow {
   display: grid;
   gap: 18px;
+  min-width: 0;
+}
+
+.attendance-team-workflow > .glass-card {
+  min-width: 0;
 }
 
 .attendance-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   overflow: hidden;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -3488,6 +3503,50 @@ h1, h2, h3, h4 {
   height: 40px;
   padding: 0 11px;
   font-size: 0.82rem;
+}
+
+.attendance-review-actions,
+.attendance-correction-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.attendance-review-actions button {
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 0.76rem;
+}
+
+.attendance-correction-modal {
+  width: min(520px, calc(100vw - 32px));
+  padding: 24px;
+  display: grid;
+  gap: 18px;
+}
+
+.attendance-correction-modal h2 {
+  font-size: 1.2rem;
+}
+
+.attendance-correction-modal label {
+  display: grid;
+  gap: 7px;
+}
+
+.attendance-correction-modal label > span {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.attendance-correction-modal input,
+.attendance-correction-modal textarea {
+  width: 100%;
+}
+
+.attendance-correction-actions {
+  justify-content: flex-end;
 }
 
 .logs-workflow {
@@ -3590,14 +3649,14 @@ h1, h2, h3, h4 {
 
 @media (max-width: 820px) {
   .attendance-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .attendance-metrics button:nth-child(2) {
+  .attendance-metrics button:nth-child(3n) {
     border-right: 0;
   }
 
-  .attendance-metrics button:nth-child(-n+2) {
+  .attendance-metrics button:nth-child(-n+3) {
     border-bottom: 1px solid var(--border-color);
   }
 
@@ -3620,6 +3679,27 @@ h1, h2, h3, h4 {
 }
 
 @media (max-width: 560px) {
+  .attendance-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .attendance-metrics button:nth-child(3n) {
+    border-right: 1px solid var(--border-color);
+  }
+
+  .attendance-metrics button:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .attendance-metrics button:nth-child(-n+4) {
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .attendance-correction-actions,
+  .attendance-correction-actions button {
+    width: 100%;
+  }
+
   .logs-compliance {
     grid-template-columns: 1fr;
   }

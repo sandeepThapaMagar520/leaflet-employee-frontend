@@ -1,17 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import ActionModal from "@/app/components/ActionModal";
 import {
+  approveAttendanceCorrection,
+  AttendanceCorrection,
   AttendanceDaySummary,
   AttendanceSession,
+  createAttendanceCorrection,
   downloadExport,
   endAttendanceSession,
   getActiveAttendanceSession,
   getAllAttendanceSessions,
+  getAttendanceCorrections,
   getMyAttendanceSessions,
   getMyTodayAttendanceSummary,
   getTeamDailyAttendanceSummary,
+  rejectAttendanceCorrection,
   startAttendanceSession,
 } from "@/lib/api";
 import { useToast } from "@/lib/toast";
@@ -21,7 +27,9 @@ type AttendanceFilter = "ALL" | "EXCEPTIONS" | "COMPLETED_ANY" | AttendanceDaySu
 
 const statusLabels: Record<AttendanceDaySummary["status"], string> = {
   NO_ACTIVITY: "No activity",
+  ON_LEAVE: "On approved leave",
   IN_PROGRESS: "In progress",
+  MISSING_CHECKOUT: "Missing checkout",
   UNDER_HOURS: "Under hours",
   COMPLETED_WITH_GRACE: "Completed with grace",
   COMPLETED: "Completed",
@@ -29,7 +37,9 @@ const statusLabels: Record<AttendanceDaySummary["status"], string> = {
 
 const statusColors: Record<AttendanceDaySummary["status"], string> = {
   NO_ACTIVITY: "var(--text-secondary)",
+  ON_LEAVE: "var(--info-color)",
   IN_PROGRESS: "var(--info-color)",
+  MISSING_CHECKOUT: "var(--danger-color)",
   UNDER_HOURS: "var(--warning-color)",
   COMPLETED_WITH_GRACE: "var(--success-color)",
   COMPLETED: "var(--success-color)",
@@ -69,6 +79,13 @@ function formatDuration(minutes: number) {
   return `${hours}h ${mins}m`;
 }
 
+function toDateTimeLocal(isoString: string | null) {
+  if (!isoString) return "";
+  const date = new Date(isoString);
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
 export default function AttendancePage() {
   const toast = useToast();
   const { loading: authLoading, user } = useAuth(["ADMIN", "MANAGER", "EMPLOYEE"]);
@@ -76,12 +93,20 @@ export default function AttendancePage() {
   const [todaySummary, setTodaySummary] = useState<AttendanceDaySummary | null>(null);
   const [teamSummaries, setTeamSummaries] = useState<AttendanceDaySummary[]>([]);
   const [activeSession, setActiveSession] = useState<AttendanceSession | null>(null);
+  const [corrections, setCorrections] = useState<AttendanceCorrection[]>([]);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [filterName, setFilterName] = useState("");
   const [filterDate, setFilterDate] = useState(todayIsoDate());
   const [statusFilter, setStatusFilter] = useState<AttendanceFilter>("EXCEPTIONS");
+  const [correctionSession, setCorrectionSession] = useState<AttendanceSession | null>(null);
+  const [correctedStart, setCorrectedStart] = useState("");
+  const [correctedEnd, setCorrectedEnd] = useState("");
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [reviewTarget, setReviewTarget] = useState<{ correction: AttendanceCorrection; action: "approve" | "reject" } | null>(null);
+  const [reviewNote, setReviewNote] = useState("");
+  const [correctionWorking, setCorrectionWorking] = useState(false);
 
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER";
   const isAdmin = user?.role === "ADMIN";
@@ -89,16 +114,18 @@ export default function AttendancePage() {
   async function loadData(date = filterDate) {
     try {
       setLoading(true);
-      const [active, history, summary, teamDaily] = await Promise.all([
+      const [active, history, summary, teamDaily, correctionList] = await Promise.all([
         getActiveAttendanceSession(),
         canManage ? getAllAttendanceSessions() : getMyAttendanceSessions(),
         isAdmin ? Promise.resolve(null) : getMyTodayAttendanceSummary(),
         canManage ? getTeamDailyAttendanceSummary(date) : Promise.resolve([]),
+        getAttendanceCorrections(),
       ]);
       setActiveSession(active);
       setSessions(history);
       setTodaySummary(summary);
       setTeamSummaries(teamDaily);
+      setCorrections(correctionList);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load attendance data");
     } finally {
@@ -154,6 +181,58 @@ export default function AttendancePage() {
     }
   }
 
+  function openCorrection(session: AttendanceSession) {
+    setCorrectionSession(session);
+    setCorrectedStart(toDateTimeLocal(session.startTime));
+    setCorrectedEnd(toDateTimeLocal(session.endTime));
+    setCorrectionReason("");
+  }
+
+  async function handleCorrectionSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!correctionSession || !correctedStart || !correctedEnd || !correctionReason.trim()) return;
+    if (new Date(correctedEnd) <= new Date(correctedStart)) {
+      toast.error("Corrected end time must be after the start time.");
+      return;
+    }
+    setCorrectionWorking(true);
+    try {
+      await createAttendanceCorrection({
+        sessionId: correctionSession.id,
+        requestedStartTime: new Date(correctedStart).toISOString(),
+        requestedEndTime: new Date(correctedEnd).toISOString(),
+        reason: correctionReason.trim(),
+      });
+      toast.success("Attendance correction submitted for review.");
+      setCorrectionSession(null);
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to submit attendance correction");
+    } finally {
+      setCorrectionWorking(false);
+    }
+  }
+
+  async function handleCorrectionReview() {
+    if (!reviewTarget || !reviewNote.trim()) return;
+    setCorrectionWorking(true);
+    try {
+      if (reviewTarget.action === "approve") {
+        await approveAttendanceCorrection(reviewTarget.correction.id, reviewNote.trim());
+      } else {
+        await rejectAttendanceCorrection(reviewTarget.correction.id, reviewNote.trim());
+      }
+      toast.success(reviewTarget.action === "approve" ? "Attendance correction approved." : "Attendance correction rejected.");
+      setReviewTarget(null);
+      setReviewNote("");
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to review attendance correction");
+    } finally {
+      setCorrectionWorking(false);
+    }
+  }
+
   const todaySessions = useMemo(() => {
     const source = canManage ? sessions : sessions.filter(session => localIsoDate(session.startTime) === todayIsoDate());
     return source.filter(session => (filterDate ? localIsoDate(session.startTime) === filterDate : true));
@@ -161,7 +240,9 @@ export default function AttendancePage() {
 
   const attendanceMetrics = useMemo(() => ({
     noActivity: teamSummaries.filter(summary => summary.status === "NO_ACTIVITY").length,
+    onLeave: teamSummaries.filter(summary => summary.status === "ON_LEAVE").length,
     inProgress: teamSummaries.filter(summary => summary.status === "IN_PROGRESS").length,
+    missingCheckout: teamSummaries.filter(summary => summary.status === "MISSING_CHECKOUT").length,
     underHours: teamSummaries.filter(summary => summary.status === "UNDER_HOURS").length,
     completed: teamSummaries.filter(summary => summary.status === "COMPLETED" || summary.status === "COMPLETED_WITH_GRACE").length,
   }), [teamSummaries]);
@@ -169,7 +250,7 @@ export default function AttendancePage() {
   const filteredTeamSummaries = teamSummaries.filter(summary => {
     const matchesName = summary.userFullName.toLowerCase().includes(filterName.toLowerCase());
     const matchesStatus = statusFilter === "ALL"
-      || (statusFilter === "EXCEPTIONS" ? summary.status === "NO_ACTIVITY" || summary.status === "UNDER_HOURS" : summary.status === statusFilter);
+      || (statusFilter === "EXCEPTIONS" ? ["NO_ACTIVITY", "MISSING_CHECKOUT", "UNDER_HOURS"].includes(summary.status) : summary.status === statusFilter);
     const matchesCombinedCompleted = statusFilter === "COMPLETED_ANY"
       && (summary.status === "COMPLETED" || summary.status === "COMPLETED_WITH_GRACE");
     return matchesName && (matchesStatus || matchesCombinedCompleted);
@@ -196,7 +277,7 @@ export default function AttendancePage() {
       {authLoading || loading ? (
         <div style={{ display: "flex", justifyContent: "center", marginTop: "40px" }}>Loading attendance...</div>
       ) : (
-        <div style={{ display: "grid", gap: "24px" }}>
+        <div className="attendance-page-grid">
           {!isAdmin && todaySummary && (
             <div className="glass-card" style={{ display: "grid", gridTemplateColumns: "minmax(260px, 0.9fr) minmax(280px, 1.1fr)", gap: "28px", alignItems: "center" }}>
               <div>
@@ -262,8 +343,10 @@ export default function AttendancePage() {
             <div className="attendance-team-workflow">
               <section className="attendance-metrics" aria-label="Daily attendance summary">
                 <button type="button" className={statusFilter === "NO_ACTIVITY" ? "active" : ""} onClick={() => setStatusFilter("NO_ACTIVITY")}><span>No activity</span><strong>{attendanceMetrics.noActivity}</strong><small>Needs review</small></button>
+                <button type="button" className={statusFilter === "MISSING_CHECKOUT" ? "active" : ""} onClick={() => setStatusFilter("MISSING_CHECKOUT")}><span>Missing checkout</span><strong>{attendanceMetrics.missingCheckout}</strong><small>Open too long</small></button>
                 <button type="button" className={statusFilter === "IN_PROGRESS" ? "active" : ""} onClick={() => setStatusFilter("IN_PROGRESS")}><span>Working now</span><strong>{attendanceMetrics.inProgress}</strong><small>Active sessions</small></button>
                 <button type="button" className={statusFilter === "UNDER_HOURS" ? "active" : ""} onClick={() => setStatusFilter("UNDER_HOURS")}><span>Under hours</span><strong>{attendanceMetrics.underHours}</strong><small>Below grace mark</small></button>
+                <button type="button" className={statusFilter === "ON_LEAVE" ? "active" : ""} onClick={() => setStatusFilter("ON_LEAVE")}><span>On leave</span><strong>{attendanceMetrics.onLeave}</strong><small>Approved absence</small></button>
                 <button type="button" className={statusFilter === "COMPLETED_ANY" ? "active" : ""} onClick={() => setStatusFilter("COMPLETED_ANY")}><span>Completed</span><strong>{attendanceMetrics.completed}</strong><small>Target or grace met</small></button>
               </section>
 
@@ -287,8 +370,10 @@ export default function AttendancePage() {
                     <option value="EXCEPTIONS">Exceptions first</option>
                     <option value="ALL">All statuses</option>
                     <option value="NO_ACTIVITY">No activity</option>
+                    <option value="MISSING_CHECKOUT">Missing checkout</option>
                     <option value="IN_PROGRESS">In progress</option>
                     <option value="UNDER_HOURS">Under hours</option>
+                    <option value="ON_LEAVE">On approved leave</option>
                     <option value="COMPLETED_ANY">Any completion</option>
                     <option value="COMPLETED_WITH_GRACE">Completed with grace</option>
                     <option value="COMPLETED">Completed</option>
@@ -328,6 +413,34 @@ export default function AttendancePage() {
             </div>
           )}
 
+          {canManage && (
+            <div className="glass-card">
+              <div className="attendance-team-header">
+                <div>
+                  <h2>Correction Requests</h2>
+                  <p>{corrections.filter(correction => correction.status === "PENDING").length} pending review</p>
+                </div>
+              </div>
+              <Table>
+                <thead><tr><HeaderCell>Employee</HeaderCell><HeaderCell>Requested time</HeaderCell><HeaderCell>Reason</HeaderCell><HeaderCell>Status</HeaderCell><HeaderCell>Action</HeaderCell></tr></thead>
+                <tbody>
+                  {corrections.slice(0, 10).map(correction => (
+                    <tr key={correction.id} style={{ borderBottom: "1px solid var(--border-color)" }}>
+                      <BodyCell strong>{correction.userFullName}</BodyCell>
+                      <BodyCell>{formatDate(correction.requestedStartTime)} · {formatTime(correction.requestedStartTime)}–{formatTime(correction.requestedEndTime)}</BodyCell>
+                      <BodyCell>{correction.reason}</BodyCell>
+                      <BodyCell><span className={correction.status === "APPROVED" ? "badge-done" : correction.status === "REJECTED" ? "badge-blocked" : "badge-in-progress"}>{correction.status.toLowerCase()}</span></BodyCell>
+                      <BodyCell>
+                        {correction.status === "PENDING" ? <div className="attendance-review-actions"><button type="button" className="btn-primary" onClick={() => setReviewTarget({ correction, action: "approve" })}>Approve</button><button type="button" className="btn-secondary" onClick={() => setReviewTarget({ correction, action: "reject" })}>Reject</button></div> : <span className="text-muted text-sm">{correction.reviewerFullName ?? "Reviewed"}</span>}
+                      </BodyCell>
+                    </tr>
+                  ))}
+                  {corrections.length === 0 && <EmptyRow colSpan={5} label="No attendance corrections yet." />}
+                </tbody>
+              </Table>
+            </div>
+          )}
+
           <div className="glass-card">
             <div className="flex justify-between items-center mb-6">
               <h2 style={{ fontSize: "1.2rem", margin: 0 }}>
@@ -350,6 +463,7 @@ export default function AttendancePage() {
                   <HeaderCell>Start</HeaderCell>
                   <HeaderCell>Stop</HeaderCell>
                   <HeaderCell>Duration</HeaderCell>
+                  {!canManage && <HeaderCell>Correction</HeaderCell>}
                 </tr>
               </thead>
               <tbody>
@@ -360,14 +474,44 @@ export default function AttendancePage() {
                     <BodyCell>{formatTime(session.startTime)}</BodyCell>
                     <BodyCell>{session.endTime ? formatTime(session.endTime) : <span style={{ color: "var(--success-color)", fontWeight: 700 }}>Active</span>}</BodyCell>
                     <BodyCell>{session.totalHours ? `${Number(session.totalHours).toFixed(2)} hrs` : "-"}</BodyCell>
+                    {!canManage && <BodyCell><button type="button" className="btn-secondary" disabled={!session.endTime} onClick={() => openCorrection(session)}>{session.endTime ? "Request edit" : "End first"}</button></BodyCell>}
                   </tr>
                 ))}
-                {todaySessions.length === 0 && <EmptyRow colSpan={canManage ? 5 : 4} label="No sessions found." />}
+                {todaySessions.length === 0 && <EmptyRow colSpan={5} label="No sessions found." />}
               </tbody>
             </Table>
           </div>
         </div>
       )}
+
+      {correctionSession && (
+        <div className="project-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="attendance-correction-title">
+          <form className="glass-panel attendance-correction-modal" onSubmit={handleCorrectionSubmit}>
+            <h2 id="attendance-correction-title">Request attendance correction</h2>
+            <p className="text-muted text-sm">The original session remains unchanged until a manager or admin approves this request.</p>
+            <label><span>Corrected start</span><input type="datetime-local" value={correctedStart} onChange={event => setCorrectedStart(event.target.value)} required /></label>
+            <label><span>Corrected end</span><input type="datetime-local" value={correctedEnd} onChange={event => setCorrectedEnd(event.target.value)} required /></label>
+            <label><span>Reason</span><textarea rows={4} maxLength={1000} value={correctionReason} onChange={event => setCorrectionReason(event.target.value)} placeholder="Explain what happened, for example: forgot to check out after client call." required /></label>
+            <div className="attendance-correction-actions"><button type="button" className="btn-secondary" onClick={() => setCorrectionSession(null)} disabled={correctionWorking}>Cancel</button><button type="submit" className="btn-primary" disabled={correctionWorking}>{correctionWorking ? "Submitting..." : "Submit request"}</button></div>
+          </form>
+        </div>
+      )}
+
+      <ActionModal
+        open={reviewTarget !== null}
+        title={reviewTarget?.action === "approve" ? "Approve correction" : "Reject correction"}
+        description={reviewTarget ? `${reviewTarget.correction.userFullName} requested ${formatTime(reviewTarget.correction.requestedStartTime)}–${formatTime(reviewTarget.correction.requestedEndTime)}. Add a note to preserve the review context.` : ""}
+        confirmLabel={reviewTarget?.action === "approve" ? "Approve correction" : "Reject correction"}
+        tone={reviewTarget?.action === "reject" ? "danger" : "primary"}
+        noteLabel="Review note"
+        notePlaceholder="Why is this correction being approved or rejected?"
+        noteValue={reviewNote}
+        noteRequired
+        loading={correctionWorking}
+        onNoteChange={setReviewNote}
+        onCancel={() => { setReviewTarget(null); setReviewNote(""); }}
+        onConfirm={() => void handleCorrectionReview()}
+      />
     </div>
   );
 }

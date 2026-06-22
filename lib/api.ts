@@ -790,7 +790,9 @@ export type AttendanceSession = {
 
 export type AttendanceDayStatus =
   | "NO_ACTIVITY"
+  | "ON_LEAVE"
   | "IN_PROGRESS"
+  | "MISSING_CHECKOUT"
   | "UNDER_HOURS"
   | "COMPLETED_WITH_GRACE"
   | "COMPLETED";
@@ -842,6 +844,55 @@ export async function getActiveAttendanceSession() {
   if (response.status === 204) return null;
   if (!response.ok) throw new Error("Failed to fetch active session");
   return (await response.json()) as AttendanceSession;
+}
+
+export type AttendanceCorrectionStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export type AttendanceCorrection = {
+  id: number;
+  sessionId: number;
+  userId: number;
+  userFullName: string;
+  originalStartTime: string;
+  originalEndTime: string | null;
+  requestedStartTime: string;
+  requestedEndTime: string;
+  reason: string;
+  status: AttendanceCorrectionStatus;
+  reviewerFullName: string | null;
+  reviewerNote: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+};
+
+export async function getAttendanceCorrections() {
+  return request<AttendanceCorrection[]>("/attendance/corrections");
+}
+
+export async function createAttendanceCorrection(payload: {
+  sessionId: number;
+  requestedStartTime: string;
+  requestedEndTime: string;
+  reason: string;
+}) {
+  return request<AttendanceCorrection>("/attendance/corrections", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function approveAttendanceCorrection(correctionId: number, reviewerNote: string) {
+  return request<AttendanceCorrection>(`/attendance/corrections/${correctionId}/approve`, {
+    method: "PATCH",
+    body: JSON.stringify({ reviewerNote }),
+  });
+}
+
+export async function rejectAttendanceCorrection(correctionId: number, reviewerNote: string) {
+  return request<AttendanceCorrection>(`/attendance/corrections/${correctionId}/reject`, {
+    method: "PATCH",
+    body: JSON.stringify({ reviewerNote }),
+  });
 }
 
 // Daily Logs
