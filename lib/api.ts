@@ -480,6 +480,10 @@ export async function getMyProfile() {
   return request<Profile>("/users/me");
 }
 
+export async function getMyDocuments() {
+  return request<StaffDocument[]>("/users/me/documents");
+}
+
 export async function updateMyProfile(payload: {
   fullName?: string;
   phone?: string;

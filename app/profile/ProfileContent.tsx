@@ -11,6 +11,7 @@ import {
   getAllTasks,
   getMyAttendanceSessions,
   getMyDailyLogs,
+  getMyDocuments,
   getMyProfile,
   getMyTasks,
   getNotificationPreferences,
@@ -21,6 +22,7 @@ import {
   requestEmailChange,
   requestPasswordReset,
   resendVerificationEmail,
+  StaffDocument,
   Task,
   updateMyProfile,
   updateNotificationPreferences,
@@ -30,12 +32,13 @@ import {
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 
-type Tab = "personal" | "security" | "preferences" | "work";
+type Tab = "personal" | "security" | "preferences" | "documents" | "work";
 
 const BASE_TABS: { id: Tab; label: string; description: string }[] = [
   { id: "personal", label: "Personal details", description: "Identity and contact information" },
   { id: "security", label: "Security", description: "Password and account access" },
   { id: "preferences", label: "Notifications", description: "Email delivery preferences" },
+  { id: "documents", label: "Documents", description: "HR files shared with you" },
 ];
 
 function formatHours(hours: number) {
@@ -69,6 +72,7 @@ export default function ProfileContent() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [attendance, setAttendance] = useState<AttendanceSession[]>([]);
   const [logs, setLogs] = useState<DailyLog[]>([]);
+  const [documents, setDocuments] = useState<StaffDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -116,6 +120,7 @@ export default function ProfileContent() {
       try {
         const profilePromise = getMyProfile();
         const preferencesPromise = getNotificationPreferences();
+        const documentsPromise = getMyDocuments();
         const workPromise = hasWorkSummary
           ? Promise.all([
               getProjects(),
@@ -124,9 +129,10 @@ export default function ProfileContent() {
               user.role === "MANAGER" ? getAllDailyLogs() : getMyDailyLogs(),
             ])
           : Promise.resolve<[Project[], Task[], AttendanceSession[], DailyLog[]]>([[], [], [], []]);
-        const [profileData, prefsData, [projectList, taskList, attendanceList, logList]] = await Promise.all([
+        const [profileData, prefsData, documentList, [projectList, taskList, attendanceList, logList]] = await Promise.all([
           profilePromise,
           preferencesPromise,
+          documentsPromise,
           workPromise,
         ]);
         setProfile(profileData);
@@ -135,6 +141,7 @@ export default function ProfileContent() {
         setTasks(taskList);
         setAttendance(attendanceList);
         setLogs(logList);
+        setDocuments(documentList);
         setFullName(profileData.fullName);
         setPhone(profileData.phone ?? "");
         setEmergencyContact(profileData.emergencyContact ?? "");
@@ -657,6 +664,42 @@ export default function ProfileContent() {
                   </label>
                 ))}
               </div>
+            </section>
+          )}
+
+          {tab === "documents" && (
+            <section className="profile-section">
+              <div className="profile-section-heading">
+                <div>
+                  <h2>My documents</h2>
+                  <p>Contracts, offer letters, ID documents, certificates, and other HR files shared by admin.</p>
+                </div>
+                <span className="profile-muted-chip">{documents.length} files</span>
+              </div>
+
+              {documents.length === 0 ? (
+                <div className="profile-document-empty">
+                  <strong>No documents shared yet</strong>
+                  <p className="text-sm text-muted">When admin uploads documents to your staff record, they will appear here for viewing and download.</p>
+                </div>
+              ) : (
+                <div className="staff-document-list profile-document-list">
+                  {documents.map(document => (
+                    <article className="staff-document-item" key={document.id}>
+                      <div>
+                        <span className="staff-document-type">{titleCase(document.documentType)}</span>
+                        <h3>{document.fileName}</h3>
+                        <p>{formatDateTime(document.createdAt)}</p>
+                        {document.note && <p>{document.note}</p>}
+                      </div>
+                      <div className="staff-document-actions">
+                        <a href={document.fileUrl} target="_blank" rel="noreferrer">Open</a>
+                        <a href={document.fileUrl} download={document.fileName}>Download</a>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
             </section>
           )}
 

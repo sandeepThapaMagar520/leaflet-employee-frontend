@@ -2745,6 +2745,24 @@ h1, h2, h3, h4 {
   border: 0;
 }
 
+.profile-document-list {
+  margin-top: 4px;
+}
+
+.profile-document-empty {
+  padding: 30px 18px;
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.3);
+  text-align: center;
+}
+
+.profile-document-empty strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.95rem;
+}
+
 .profile-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
