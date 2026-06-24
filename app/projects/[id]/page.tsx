@@ -287,6 +287,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [uploadingNote,   setUploadingNote]   = useState(false);
   const [showNoteModal,   setShowNoteModal]   = useState(false);
   const [editingNoteId,   setEditingNoteId]   = useState<number | null>(null);
+  const [viewingNote,     setViewingNote]     = useState<ProjectNote | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // notes filter
@@ -1088,6 +1089,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const publicProjectNotes = projectNotes.filter(note => !isDetailProfileNote(note));
+  const viewingNoteDetails = viewingNote ? decodeNote(viewingNote.content) : null;
 
   // filtered notes for the notes tab
   const visibleNotes = notesFilter === "ALL"
@@ -1868,7 +1870,17 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                   </button>
                                 </div>
                               </div>
-                              <p style={{ whiteSpace: "pre-wrap", fontSize: "0.88rem", lineHeight: 1.55, color: "var(--text-primary)" }}>{decoded.text}</p>
+                              <button
+                                type="button"
+                                className="project-note-preview compact"
+                                onClick={() => setViewingNote(note)}
+                                aria-label={`View full ${meta.label} note`}
+                              >
+                                {decoded.text}
+                              </button>
+                              <button type="button" className="note-view-link" onClick={() => setViewingNote(note)}>
+                                View full note
+                              </button>
                               {decoded.attachments.length > 0 && (
                                 <div style={{ marginTop: "10px", display: "flex", flexWrap: "wrap", gap: "8px" }}>
                                   {decoded.attachments.map((att, index) => (
@@ -1974,9 +1986,17 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     </div>
 
                     {/* Body text */}
-                    <p style={{ whiteSpace: "pre-wrap", fontSize: "0.92rem", lineHeight: 1.6, color: "var(--text-primary)" }}>
+                    <button
+                      type="button"
+                      className="project-note-preview"
+                      onClick={() => setViewingNote(note)}
+                      aria-label={`View full ${meta.label} note`}
+                    >
                       {decoded.text}
-                    </p>
+                    </button>
+                    <button type="button" className="note-view-link" onClick={() => setViewingNote(note)}>
+                      View full note
+                    </button>
 
                     {/* Attachments */}
                     {decoded.attachments.length > 0 && (
@@ -2141,6 +2161,55 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 {uploadingNote ? "Saving…" : editingNoteId ? "Update Note" : "Save Note"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {viewingNote && viewingNoteDetails && (
+        <div
+          className="project-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="project-note-view-title"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setViewingNote(null);
+          }}
+        >
+          <div className="glass-panel project-modal note-detail-modal">
+            <div className="note-detail-header">
+              <div>
+                <p className="text-xs text-muted">
+                  {viewingNote.noteType === "TEAM" ? "Project team note" : "Admins and manager note"}
+                </p>
+                <h2 id="project-note-view-title">{categoryMeta(viewingNoteDetails.category).label}</h2>
+                <div className="text-xs text-muted">
+                  {viewingNote.createdByName}
+                  {viewingNoteDetails.date ? ` · ${viewingNoteDetails.date}` : ` · ${new Date(viewingNote.createdAt).toLocaleDateString()}`}
+                </div>
+              </div>
+              <button type="button" aria-label="Close note" onClick={() => setViewingNote(null)}>×</button>
+            </div>
+            {viewingNoteDetails.detailTitle || viewingNoteDetails.detailCost ? (
+              <div className="note-detail-meta">
+                {viewingNoteDetails.detailTitle && <span>{viewingNoteDetails.detailTitle}</span>}
+                {viewingNoteDetails.detailCost && <span>{formatMoney(Number(viewingNoteDetails.detailCost))}</span>}
+              </div>
+            ) : null}
+            <div className="note-detail-body">
+              <p>{viewingNoteDetails.text}</p>
+            </div>
+            {viewingNoteDetails.attachments.length > 0 && (
+              <div className="note-detail-attachments">
+                <div className="text-xs text-muted">Attachments</div>
+                {viewingNoteDetails.attachments.map((attachment, index) => (
+                  <a key={`${attachment.url}-${index}`} href={attachment.url} target="_blank" rel="noopener noreferrer" download={attachment.kind === "document" ? attachment.fileName : undefined}>
+                    {attachment.kind === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={attachment.url} alt={attachment.fileName} />
+                    ) : <span>{attachment.fileName}</span>}
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

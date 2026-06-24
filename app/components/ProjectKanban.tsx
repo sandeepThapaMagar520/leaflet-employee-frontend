@@ -17,6 +17,36 @@ const STATUS_DOT: Record<string, string> = {
   DONE: "var(--success-color)",
 };
 
+function todayIsoDate() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function daysUntilDue(dueDate: string) {
+  const today = new Date(`${todayIsoDate()}T00:00:00`);
+  const due = new Date(`${dueDate}T00:00:00`);
+  return Math.round((due.getTime() - today.getTime()) / 86_400_000);
+}
+
+function dueWarning(task: Task) {
+  if (!task.dueDate || task.status === "DONE") return null;
+  const days = daysUntilDue(task.dueDate);
+  const priorityRisk = task.priority === "CRITICAL" || task.priority === "HIGH";
+  if (days < 0) {
+    return { severity: priorityRisk ? "critical" : "danger", label: "Overdue" } as const;
+  }
+  if (days === 0) {
+    return { severity: priorityRisk ? "critical" : "warning", label: "Due today" } as const;
+  }
+  if (days === 1 || (days <= 3 && priorityRisk)) {
+    return { severity: priorityRisk ? "warning" : "notice", label: days === 1 ? "Due tomorrow" : "Due soon" } as const;
+  }
+  return null;
+}
+
 type ProjectKanbanProps = {
   tasks: Task[];
   boards?: ProjectTaskBoard[];
@@ -101,61 +131,65 @@ export default function ProjectKanban({ tasks, boards = DEFAULT_BOARDS, readOnly
           </h4>
           <div style={{ display: "flex", flexDirection: "column", gap: "12px", flex: 1 }}>
             {boardTasks
-              .map(task => (
-                <div
-                  key={task.id}
-                  draggable={!readOnly}
-                  onDragStart={readOnly ? undefined : () => { draggedTaskIdRef.current = task.id; }}
-                  onDragEnd={readOnly ? undefined : () => { draggedTaskIdRef.current = null; }}
-                  onClick={() => onTaskSelect?.(task)}
-                  className="glass-card"
-                  style={{
-                    padding: "14px",
-                    fontSize: "0.9rem",
-                    background: "rgba(30,41,59,0.5)",
-                    cursor: onTaskSelect ? "pointer" : readOnly ? "default" : "grab",
-                    outline: selectedTaskId === task.id ? "2px solid var(--primary-color)" : "none",
-                    borderLeft: `4px solid ${
-                      task.priority === "CRITICAL"
-                        ? "var(--danger-color)"
-                        : task.priority === "HIGH"
-                          ? "#fb923c"
-                          : task.priority === "MEDIUM"
-                            ? "var(--primary-color)"
-                            : "var(--text-secondary)"
-                    }`,
-                  }}
-                >
-                  <div style={{ fontWeight: 600, marginBottom: "8px", lineHeight: 1.4 }}>{task.title}</div>
-                  <div className="flex justify-between items-center mt-3">
-                    <div className="flex items-center gap-1">
-                      <div
-                        style={{
-                          width: "20px",
-                          height: "20px",
-                          borderRadius: "50%",
-                          background: "var(--accent-color)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: "0.6rem",
-                          fontWeight: 700,
-                        }}
-                      >
-                        {task.assignedToName?.split(" ").map(n => n[0]).join("") || "U"}
+              .map(task => {
+                const warning = dueWarning(task);
+                return (
+                  <div
+                    key={task.id}
+                    draggable={!readOnly}
+                    onDragStart={readOnly ? undefined : () => { draggedTaskIdRef.current = task.id; }}
+                    onDragEnd={readOnly ? undefined : () => { draggedTaskIdRef.current = null; }}
+                    onClick={() => onTaskSelect?.(task)}
+                    className={`glass-card kanban-task-card ${warning ? `due-${warning.severity}` : ""}`}
+                    style={{
+                      padding: "14px",
+                      fontSize: "0.9rem",
+                      background: "rgba(30,41,59,0.5)",
+                      cursor: onTaskSelect ? "pointer" : readOnly ? "default" : "grab",
+                      outline: selectedTaskId === task.id ? "2px solid var(--primary-color)" : "none",
+                      borderLeft: `4px solid ${
+                        task.priority === "CRITICAL"
+                          ? "var(--danger-color)"
+                          : task.priority === "HIGH"
+                            ? "#fb923c"
+                            : task.priority === "MEDIUM"
+                              ? "var(--primary-color)"
+                              : "var(--text-secondary)"
+                      }`,
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: "8px", lineHeight: 1.4 }}>{task.title}</div>
+                    {warning && <span className={`task-inline-warning due-${warning.severity}`}>{warning.label}</span>}
+                    <div className="flex justify-between items-center mt-3">
+                      <div className="flex items-center gap-1">
+                        <div
+                          style={{
+                            width: "20px",
+                            height: "20px",
+                            borderRadius: "50%",
+                            background: "var(--accent-color)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: "0.6rem",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {task.assignedToName?.split(" ").map(n => n[0]).join("") || "U"}
+                        </div>
+                        <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                          {task.assignedToName}
+                        </span>
                       </div>
-                      <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                        {task.assignedToName}
-                      </span>
+                      {task.dueDate && (
+                        <span className={`text-xs ${warning ? `task-due due-${warning.severity}` : "text-muted"}`}>
+                          {new Date(task.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        </span>
+                      )}
                     </div>
-                    {task.dueDate && (
-                      <span className="text-xs text-muted">
-                        {new Date(task.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                      </span>
-                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             {boardTasks.length === 0 && (
               <div
                 style={{

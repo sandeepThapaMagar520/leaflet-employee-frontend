@@ -6,6 +6,14 @@ import { createTask, Project, getProjects, getUsers, User, TaskPriority } from "
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 
+function todayIsoDate() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function NewTaskForm() {
   const router = useRouter();
   const toast = useToast();
@@ -24,6 +32,7 @@ function NewTaskForm() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
+  const minDueDate = todayIsoDate();
   const selectedProject = projects.find(project => project.id === Number(projectId));
   const selectedProjectMemberIds = new Set<number>([
     ...(selectedProject?.assignedEmployees?.map(employee => employee.id) ?? []),
@@ -61,6 +70,10 @@ function NewTaskForm() {
     e.preventDefault();
     if (!title || !projectId || !assignedToId) {
       toast.error("Title, project, and assignee are required");
+      return;
+    }
+    if (dueDate && dueDate < minDueDate) {
+      toast.error("Due date must be today or a future date.");
       return;
     }
 
@@ -188,6 +201,7 @@ function NewTaskForm() {
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
+                min={minDueDate}
                 style={{ width: "100%" }}
               />
             </div>

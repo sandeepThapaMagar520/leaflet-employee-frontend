@@ -76,11 +76,50 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
+function todayIsoDate() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function daysUntilDue(dueDate: string) {
+  const today = new Date(`${todayIsoDate()}T00:00:00`);
+  const due = new Date(`${dueDate}T00:00:00`);
+  return Math.round((due.getTime() - today.getTime()) / 86_400_000);
+}
+
+function dueWarning(task: Task) {
+  if (!task.dueDate || task.status === "DONE") return null;
+  const days = daysUntilDue(task.dueDate);
+  const priorityRisk = task.priority === "CRITICAL" || task.priority === "HIGH";
+  if (days < 0) {
+    return {
+      severity: priorityRisk ? "critical" : "danger",
+      label: "Overdue",
+      detail: `${Math.abs(days)} ${Math.abs(days) === 1 ? "day" : "days"} late`,
+    } as const;
+  }
+  if (days === 0) {
+    return {
+      severity: priorityRisk ? "critical" : "warning",
+      label: "Due today",
+      detail: priorityRisk ? "High attention" : "Finish today",
+    } as const;
+  }
+  if (days === 1 || (days <= 3 && priorityRisk)) {
+    return {
+      severity: priorityRisk ? "warning" : "notice",
+      label: days === 1 ? "Due tomorrow" : "Due soon",
+      detail: `${days} ${days === 1 ? "day" : "days"} left`,
+    } as const;
+  }
+  return null;
+}
+
 function isOverdue(task: Task) {
-  if (!task.dueDate || task.status === "DONE") return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return new Date(task.dueDate) < today;
+  return dueWarning(task)?.label === "Overdue";
 }
 
 function summary(tasks: Task[]) {
@@ -219,14 +258,21 @@ function EmployeeTasksPage() {
         <div className="employee-task-grid">
           {filteredTasks.map(task => {
             const boards = getBoardOptions(task.projectId, boardsByProject);
+            const warning = dueWarning(task);
             return (
-              <article key={task.id} className={`task-work-card ${isOverdue(task) ? "is-overdue" : ""}`}>
+              <article key={task.id} className={`task-work-card ${warning ? `has-due-warning due-${warning.severity}` : ""}`}>
                 <div className="task-card-top">
                   <span className={priorityClass(task.priority)}>{task.priority}</span>
                   <span className={`badge ${getStatusBadgeClass(task.status)}`}>
                     {getStatusLabel(task.status, boards)}
                   </span>
                 </div>
+                {warning && (
+                  <div className={`task-due-warning due-${warning.severity}`} role="status">
+                    <strong>{warning.label}</strong>
+                    <span>{warning.detail}</span>
+                  </div>
+                )}
                 <h2>{task.title}</h2>
                 {task.description && <p className="task-description">{task.description}</p>}
                 <button
@@ -237,7 +283,7 @@ function EmployeeTasksPage() {
                   {task.projectName}
                 </button>
                 <div className="task-card-meta">
-                  <span className={isOverdue(task) ? "task-due overdue" : "task-due"}>{formatDate(task.dueDate)}</span>
+                  <span className={warning ? `task-due due-${warning.severity}` : "task-due"}>{formatDate(task.dueDate)}</span>
                   <select
                     value={task.status}
                     onChange={event => void handleStatusChange(task.id, event.target.value as TaskStatus)}
@@ -401,7 +447,10 @@ function AdminTasksPage() {
                       <strong>{task.assignedToName}</strong>
                     </div>
                   </td>
-                  <td><span className={isOverdue(task) ? "task-due overdue" : "task-due"}>{formatDate(task.dueDate)}</span></td>
+                  <td>
+                    <span className={dueWarning(task) ? `task-due due-${dueWarning(task)?.severity}` : "task-due"}>{formatDate(task.dueDate)}</span>
+                    {dueWarning(task) && <span className={`task-inline-warning due-${dueWarning(task)?.severity}`}>{dueWarning(task)?.label}</span>}
+                  </td>
                   <td><span className={priorityClass(task.priority)}>{task.priority}</span></td>
                   <td><span className={`badge ${getStatusBadgeClass(task.status)}`}>{getStatusLabel(task.status, defaultTaskBoards)}</span></td>
                   <td>

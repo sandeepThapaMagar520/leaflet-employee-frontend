@@ -24,6 +24,14 @@ const getStatusBadgeClass = (s: string) =>
   s === "PLANNED" ? "badge-todo" : s === "ACTIVE" ? "badge-in-progress" :
   s === "COMPLETED" ? "badge-done" : s === "ON_HOLD" ? "badge-blocked" : "";
 
+function todayIsoDate() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export default function EmployeeProjectView({ projectId }: { projectId: number }) {
   const router = useRouter();
   const toast = useToast();
@@ -52,6 +60,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
   const [taskDescription, setTaskDescription] = useState("");
   const [taskPriority, setTaskPriority] = useState<TaskPriority>("MEDIUM");
   const [taskDueDate, setTaskDueDate] = useState("");
+  const minTaskDueDate = todayIsoDate();
   const [taskAssigneeId, setTaskAssigneeId] = useState<number>(0);
   const [savingTask, setSavingTask] = useState(false);
   const [noteText, setNoteText] = useState("");
@@ -59,6 +68,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
   const [noteDate, setNoteDate] = useState(new Date().toISOString().slice(0, 10));
   const [noteAttachments, setNoteAttachments] = useState<NoteAttachment[]>([]);
   const [showNoteForm, setShowNoteForm] = useState(false);
+  const [viewingNote, setViewingNote] = useState<ProjectNote | null>(null);
   const [uploadingNoteFiles, setUploadingNoteFiles] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [activeTab, setActiveTab] = useState<"OVERVIEW" | "MILESTONES" | "TASKS" | "NOTES">("OVERVIEW");
@@ -165,6 +175,11 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
 
   async function saveTask() {
     if (!taskTitle.trim() || !taskAssigneeId) return;
+    if (taskDueDate && taskDueDate < minTaskDueDate) {
+      setFeedbackKind("error");
+      setFeedback("Due date must be today or a future date.");
+      return;
+    }
     setSavingTask(true);
     setFeedback("");
     try {
@@ -402,6 +417,8 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
     return category.split("_").map(word => word[0] + word.slice(1).toLowerCase()).join(" ");
   }
 
+  const viewingNoteDetails = viewingNote ? decodeNote(viewingNote.content) : null;
+
   return (
     <div className="max-w-6xl mx-auto">
       <nav className="project-breadcrumb">
@@ -561,7 +578,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
                 <label><span>Priority</span><select value={taskPriority} onChange={event => setTaskPriority(event.target.value as TaskPriority)}>
                   {(["LOW", "MEDIUM", "HIGH", "CRITICAL"] as TaskPriority[]).map(priority => <option key={priority} value={priority}>{priority}</option>)}
                 </select></label>
-                <label><span>Due date</span><input type="date" value={taskDueDate} onChange={event => setTaskDueDate(event.target.value)} /></label>
+                <label><span>Due date</span><input type="date" value={taskDueDate} min={minTaskDueDate} onChange={event => setTaskDueDate(event.target.value)} /></label>
               </div>
             </div>
             <div className="employee-modal-actions">
@@ -718,7 +735,17 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
                 </div>
                 <span className="employee-note-visibility">Project team</span>
               </div>
-              <p>{decoded.text}</p>
+              <button
+                type="button"
+                className="employee-note-preview"
+                onClick={() => setViewingNote(note)}
+                aria-label={`View full ${categoryLabel(decoded.category)} note`}
+              >
+                {decoded.text}
+              </button>
+              <button type="button" className="note-view-link" onClick={() => setViewingNote(note)}>
+                View full note
+              </button>
               {decoded.attachments.length > 0 && (
                 <div className="employee-note-attachments">
                   {decoded.attachments.map((attachment, index) => (
@@ -783,6 +810,47 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {viewingNote && viewingNoteDetails && (
+        <div
+          className="project-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="employee-note-view-title"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setViewingNote(null);
+          }}
+        >
+          <div className="glass-panel project-modal note-detail-modal">
+            <div className="note-detail-header">
+              <div>
+                <p className="text-xs text-muted">Project team note</p>
+                <h2 id="employee-note-view-title">{categoryLabel(viewingNoteDetails.category)}</h2>
+                <div className="text-xs text-muted">
+                  {viewingNote.createdByName} · {viewingNoteDetails.date || new Date(viewingNote.createdAt).toLocaleDateString()}
+                </div>
+              </div>
+              <button type="button" aria-label="Close note" onClick={() => setViewingNote(null)}>×</button>
+            </div>
+            <div className="note-detail-body">
+              <p>{viewingNoteDetails.text}</p>
+            </div>
+            {viewingNoteDetails.attachments.length > 0 && (
+              <div className="note-detail-attachments">
+                <div className="text-xs text-muted">Attachments</div>
+                {viewingNoteDetails.attachments.map((attachment, index) => (
+                  <a key={`${attachment.url}-${index}`} href={attachment.url} target="_blank" rel="noreferrer">
+                    {attachment.kind === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={attachment.url} alt={attachment.fileName} />
+                    ) : <span>{attachment.fileName}</span>}
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
