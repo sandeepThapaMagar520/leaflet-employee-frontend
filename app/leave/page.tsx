@@ -10,15 +10,14 @@ import {
   LeaveBalance,
   LeaveRequest,
   LeaveStatus,
-  LeaveType,
   rejectLeaveRequest,
 } from "@/lib/api";
 import ActionModal from "@/app/components/ActionModal";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 
-const leaveTypes: LeaveType[] = ["ANNUAL", "SICK", "PERSONAL", "UNPAID"];
 const statusOptions: Array<LeaveStatus | "ALL"> = ["ALL", "PENDING", "APPROVED", "REJECTED", "CANCELLED"];
+const DEFAULT_LEAVE_TYPE = "ANNUAL";
 
 function localDateKey(date = new Date()) {
   const year = date.getFullYear();
@@ -43,19 +42,33 @@ function badgeClass(status: LeaveStatus) {
   return "badge-in-progress";
 }
 
+function encodeLeaveReason(subject: string, reason: string) {
+  return `Subject: ${subject.trim()}\n\nReason:\n${reason.trim()}`;
+}
+
+function decodeLeaveReason(value: string) {
+  const subjectMatch = value.match(/^Subject:\s*(.+?)(?:\n{2,}Reason:\n([\s\S]*)|\n{2,}([\s\S]*)|$)/);
+  if (!subjectMatch) {
+    return { subject: "Leave request", reason: value };
+  }
+  return {
+    subject: subjectMatch[1].trim() || "Leave request",
+    reason: (subjectMatch[2] ?? subjectMatch[3] ?? "").trim(),
+  };
+}
+
 export default function LeavePage() {
   const { loading: authLoading, user } = useAuth(["ADMIN", "MANAGER", "EMPLOYEE"]);
   const toast = useToast();
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
   const [loading, setLoading] = useState(true);
-  const [leaveType, setLeaveType] = useState<LeaveType>("ANNUAL");
+  const [subject, setSubject] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [statusFilter, setStatusFilter] = useState<LeaveStatus | "ALL">("ALL");
-  const [typeFilter, setTypeFilter] = useState<LeaveType | "ALL">("ALL");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [nameFilter, setNameFilter] = useState("");
@@ -90,15 +103,20 @@ export default function LeavePage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!startDate || !endDate || !reason.trim()) return;
+    if (!subject.trim() || !startDate || !endDate || !reason.trim()) return;
     if (endDate < startDate) {
       toast.error("End date must be on or after the start date.");
       return;
     }
     setSubmitting(true);
     try {
-      await createLeaveRequest({ leaveType, startDate, endDate, reason: reason.trim() });
-      setLeaveType("ANNUAL");
+      await createLeaveRequest({
+        leaveType: DEFAULT_LEAVE_TYPE,
+        startDate,
+        endDate,
+        reason: encodeLeaveReason(subject, reason),
+      });
+      setSubject("");
       setStartDate("");
       setEndDate("");
       setReason("");
@@ -150,18 +168,17 @@ export default function LeavePage() {
     return requests
       .filter(request => {
         const matchesStatus = statusFilter === "ALL" || request.status === statusFilter;
-        const matchesType = typeFilter === "ALL" || request.leaveType === typeFilter;
         const matchesName = request.userFullName.toLowerCase().includes(nameFilter.toLowerCase());
         const overlapsFrom = dateFrom ? request.endDate >= dateFrom : true;
         const overlapsTo = dateTo ? request.startDate <= dateTo : true;
-        return matchesStatus && matchesType && matchesName && overlapsFrom && overlapsTo;
+        return matchesStatus && matchesName && overlapsFrom && overlapsTo;
       })
       .sort((a, b) => {
         if (a.status === "PENDING" && b.status !== "PENDING") return -1;
         if (b.status === "PENDING" && a.status !== "PENDING") return 1;
         return a.startDate.localeCompare(b.startDate);
       });
-  }, [dateFrom, dateTo, nameFilter, requests, statusFilter, typeFilter]);
+  }, [dateFrom, dateTo, nameFilter, requests, statusFilter]);
 
   const leaveMetrics = useMemo(() => {
     const today = localDateKey();
@@ -190,7 +207,6 @@ export default function LeavePage() {
   function clearFilters() {
     setNameFilter("");
     setStatusFilter(canReview ? "PENDING" : "ALL");
-    setTypeFilter("ALL");
     setDateFrom("");
     setDateTo("");
   }
@@ -198,7 +214,6 @@ export default function LeavePage() {
   function showAllRequests() {
     setNameFilter("");
     setStatusFilter("ALL");
-    setTypeFilter("ALL");
     setDateFrom("");
     setDateTo("");
   }
@@ -245,25 +260,29 @@ export default function LeavePage() {
           <div className="glass-card" style={{ alignSelf: "start" }}>
             <h2 style={{ fontSize: "1.2rem", marginBottom: "18px" }}>New Request</h2>
             <form onSubmit={handleSubmit} style={{ display: "grid", gap: "16px" }}>
-              <div>
-                <label className="text-sm text-muted block mb-2">Leave Type</label>
-                <select value={leaveType} onChange={e => setLeaveType(e.target.value as LeaveType)} style={{ width: "100%" }}>
-                  {leaveTypes.map(type => <option key={type} value={type}>{type}</option>)}
-                </select>
-              </div>
+              <label className="leave-form-field">
+                <span>Subject</span>
+                <input
+                  value={subject}
+                  onChange={event => setSubject(event.target.value)}
+                  maxLength={90}
+                  required
+                  placeholder="Example: Medical appointment leave"
+                />
+              </label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                <div>
-                  <label className="text-sm text-muted block mb-2">Start</label>
+                <label className="leave-form-field">
+                  <span>From date</span>
                   <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} required style={{ width: "100%" }} />
-                </div>
-                <div>
-                  <label className="text-sm text-muted block mb-2">End</label>
+                </label>
+                <label className="leave-form-field">
+                  <span>To date</span>
                   <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} required style={{ width: "100%" }} />
-                </div>
+                </label>
               </div>
               {plannedDays > 0 && <p className="leave-duration-preview">Requested duration: <strong>{plannedDays} day{plannedDays === 1 ? "" : "s"}</strong></p>}
-              <div>
-                <label className="text-sm text-muted block mb-2">Reason</label>
+              <label className="leave-form-field">
+                <span>Reason</span>
                 <textarea
                   value={reason}
                   onChange={e => setReason(e.target.value)}
@@ -272,7 +291,7 @@ export default function LeavePage() {
                   placeholder="Share the reason for your request..."
                   style={{ width: "100%" }}
                 />
-              </div>
+              </label>
               <button type="submit" className="btn-primary" disabled={submitting}>
                 {submitting ? "Submitting..." : "Submit Request"}
               </button>
@@ -295,54 +314,53 @@ export default function LeavePage() {
               <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as LeaveStatus | "ALL")}>
                 {statusOptions.map(status => <option key={status} value={status}>{status}</option>)}
               </select>
-              <select aria-label="Filter by leave type" value={typeFilter} onChange={event => setTypeFilter(event.target.value as LeaveType | "ALL")}>
-                <option value="ALL">All leave types</option>
-                {leaveTypes.map(type => <option key={type} value={type}>{type}</option>)}
-              </select>
               {canReview && <input aria-label="Leave overlap from date" type="date" value={dateFrom} onChange={event => setDateFrom(event.target.value)} />}
               {canReview && <input aria-label="Leave overlap to date" type="date" value={dateTo} onChange={event => setDateTo(event.target.value)} />}
-              {(nameFilter || statusFilter !== (canReview ? "PENDING" : "ALL") || typeFilter !== "ALL" || dateFrom || dateTo) && <button type="button" className="leave-reset" onClick={clearFilters}>Reset</button>}
+              {(nameFilter || statusFilter !== (canReview ? "PENDING" : "ALL") || dateFrom || dateTo) && <button type="button" className="leave-reset" onClick={clearFilters}>Reset</button>}
             </div>
           </div>
 
           <div style={{ display: "grid", gap: "14px" }}>
-            {filteredRequests.map(request => (
-              <div key={request.id} className={`leave-request-item ${request.status === "PENDING" ? "pending" : ""}`}>
-                <div className="flex justify-between items-start gap-3">
-                  <div>
-                    <div style={{ fontWeight: 700 }}>{request.leaveType} leave</div>
-                    <div className="text-sm text-muted mt-1">
-                      {request.userFullName} · {formatDate(request.startDate)} to {formatDate(request.endDate)} · {request.requestedDays} day{request.requestedDays !== 1 ? "s" : ""}
+            {filteredRequests.map(request => {
+              const decoded = decodeLeaveReason(request.reason);
+              return (
+                <div key={request.id} className={`leave-request-item ${request.status === "PENDING" ? "pending" : ""}`}>
+                  <div className="flex justify-between items-start gap-3">
+                    <div>
+                      <div style={{ fontWeight: 700 }}>{decoded.subject}</div>
+                      <div className="text-sm text-muted mt-1">
+                        {request.userFullName} · {formatDate(request.startDate)} to {formatDate(request.endDate)} · {request.requestedDays} day{request.requestedDays !== 1 ? "s" : ""}
+                      </div>
                     </div>
+                    <span className={`badge ${badgeClass(request.status)}`}>{request.status}</span>
                   </div>
-                  <span className={`badge ${badgeClass(request.status)}`}>{request.status}</span>
-                </div>
-                <p className="text-sm mt-3" style={{ lineHeight: 1.5 }}>{request.reason}</p>
-                {canReview && overlapCount(request) > 0 && (
-                  <p className="leave-overlap-warning">{overlapCount(request)} approved team absence{overlapCount(request) === 1 ? "" : "s"} overlap this request.</p>
-                )}
-                {request.reviewerNote && (
-                  <p className="text-sm text-muted mt-3">Review: {request.reviewerNote}</p>
-                )}
-                <div className="flex gap-2 mt-4">
-                  {canReview && request.status === "PENDING" && (
-                    <>
-                      <button type="button" className="btn-primary" style={{ padding: "7px 12px", fontSize: "0.8rem" }} onClick={() => { setReviewTarget({ id: request.id, action: "approve" }); setReviewNote(""); }}>
-                        Approve
-                      </button>
-                      <button type="button" className="btn-secondary" style={{ padding: "7px 12px", fontSize: "0.8rem", color: "var(--danger-color)" }} onClick={() => { setReviewTarget({ id: request.id, action: "reject" }); setReviewNote(""); }}>
-                        Reject
-                      </button>
-                    </>
+                  {decoded.reason && <p className="text-sm mt-3" style={{ lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{decoded.reason}</p>}
+                  {canReview && overlapCount(request) > 0 && (
+                    <p className="leave-overlap-warning">{overlapCount(request)} approved team absence{overlapCount(request) === 1 ? "" : "s"} overlap this request.</p>
                   )}
-                  {!canReview && request.status === "PENDING" && (
-                    <button type="button" className="btn-secondary" style={{ padding: "7px 12px", fontSize: "0.8rem" }} onClick={() => setCancelTargetId(request.id)}>
-                      Cancel Request
-                    </button>
+                  {request.reviewerNote && (
+                    <p className="text-sm text-muted mt-3">Review: {request.reviewerNote}</p>
                   )}
+                  <div className="flex gap-2 mt-4">
+                    {canReview && request.status === "PENDING" && (
+                      <>
+                        <button type="button" className="btn-primary" style={{ padding: "7px 12px", fontSize: "0.8rem" }} onClick={() => { setReviewTarget({ id: request.id, action: "approve" }); setReviewNote(""); }}>
+                          Approve
+                        </button>
+                        <button type="button" className="btn-secondary" style={{ padding: "7px 12px", fontSize: "0.8rem", color: "var(--danger-color)" }} onClick={() => { setReviewTarget({ id: request.id, action: "reject" }); setReviewNote(""); }}>
+                          Reject
+                        </button>
+                      </>
+                    )}
+                    {!canReview && request.status === "PENDING" && (
+                      <button type="button" className="btn-secondary" style={{ padding: "7px 12px", fontSize: "0.8rem" }} onClick={() => setCancelTargetId(request.id)}>
+                        Cancel Request
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {filteredRequests.length === 0 && <p className="text-muted">No leave requests found.</p>}
           </div>
         </div>

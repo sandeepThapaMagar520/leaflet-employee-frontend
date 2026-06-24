@@ -4013,6 +4013,22 @@ h1, h2, h3, h4 {
   font-size: 0.78rem;
 }
 
+.leave-form-field {
+  display: grid;
+  gap: 8px;
+}
+
+.leave-form-field span {
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.leave-form-field textarea {
+  min-height: 132px;
+  resize: vertical;
+}
+
 .leave-workspace {
   display: grid;
   grid-template-columns: 1fr;
