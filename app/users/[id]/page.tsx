@@ -17,6 +17,7 @@ import {
   StaffDocumentType,
   StaffOverview,
   Task,
+  updateStaffLeaveBalance,
   uploadFile,
 } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
@@ -225,6 +226,8 @@ export default function StaffRecordPage() {
   const [documentNote, setDocumentNote] = useState("");
   const [documentUploadStep, setDocumentUploadStep] = useState<"idle" | "uploading" | "saving">("idle");
   const [savingDocument, setSavingDocument] = useState(false);
+  const [leaveRemainingInput, setLeaveRemainingInput] = useState("");
+  const [savingLeaveBalance, setSavingLeaveBalance] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
@@ -235,7 +238,10 @@ export default function StaffRecordPage() {
       return;
     }
     getStaffOverview(staffId)
-      .then(setRecord)
+      .then(nextRecord => {
+        setRecord(nextRecord);
+        setLeaveRemainingInput(String(nextRecord.summary.remainingLeaveDays));
+      })
       .catch(error => toast.error(error instanceof Error ? error.message : "Failed to load staff records"))
       .finally(() => setLoading(false));
   }, [authLoading, params.id, toast]);
@@ -306,6 +312,27 @@ export default function StaffRecordPage() {
     const staffId = Number(params.id);
     const nextRecord = await getStaffOverview(staffId);
     setRecord(nextRecord);
+    setLeaveRemainingInput(String(nextRecord.summary.remainingLeaveDays));
+  }
+
+  async function handleLeaveBalanceSave(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!record) return;
+    const remainingDays = Number(leaveRemainingInput);
+    if (!Number.isInteger(remainingDays) || remainingDays < 0) {
+      toast.error("Remaining leave days must be a whole number.");
+      return;
+    }
+    setSavingLeaveBalance(true);
+    try {
+      await updateStaffLeaveBalance(record.staff.id, remainingDays);
+      toast.success("Leave balance updated.");
+      await refreshRecord();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update leave balance");
+    } finally {
+      setSavingLeaveBalance(false);
+    }
   }
 
   async function handleDocumentSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -486,7 +513,40 @@ export default function StaffRecordPage() {
       {activeTab === "projects" && <section className="staff-record-section"><div className="staff-record-section-head"><div><h2>Project involvement</h2><p>Projects assigned to or managed by this staff member</p></div></div><ProjectRows projects={record.projects} /></section>}
       {activeTab === "tasks" && <section className="staff-record-section"><div className="staff-record-section-head"><div><h2>Assigned tasks</h2><p>Complete task history across projects</p></div></div><FilterBar from={taskFrom} to={taskTo} onFrom={setTaskFrom} onTo={setTaskTo}><select value={taskStatusFilter} onChange={event => setTaskStatusFilter(event.target.value)}><option value="ALL">All statuses</option>{taskStatuses.map(status => <option key={status} value={status}>{titleCase(status)}</option>)}</select></FilterBar><TaskRows tasks={filteredTasks} /></section>}
       {activeTab === "attendance" && <section className="staff-record-section"><div className="staff-record-section-head"><div><h2>Attendance sessions</h2><p>Clock-in, clock-out, and recorded working hours</p></div></div><FilterBar from={attendanceFrom} to={attendanceTo} onFrom={setAttendanceFrom} onTo={setAttendanceTo} /><AttendanceRows sessions={filteredAttendance} /></section>}
-      {activeTab === "leave" && <section className="staff-record-section"><div className="staff-record-section-head"><div><h2>Leave history</h2><p>Requested dates, decisions, and reviewers</p></div></div><FilterBar from={leaveFrom} to={leaveTo} onFrom={setLeaveFrom} onTo={setLeaveTo} /><LeaveRows requests={filteredLeave} /></section>}
+      {activeTab === "leave" && (
+        <section className="staff-record-section">
+          <div className="staff-record-section-head"><div><h2>Leave history</h2><p>Requested dates, decisions, and reviewers</p></div></div>
+          <div className="staff-leave-balance-panel">
+            <div>
+              <span>Annual allowance</span>
+              <strong>{summary.annualLeaveAllowance} days</strong>
+              <small>{summary.approvedLeaveDaysThisYear} approved this year</small>
+            </div>
+            <div>
+              <span>Remaining pocket</span>
+              <strong>{summary.remainingLeaveDays} days</strong>
+              <small>Admin-adjustable balance</small>
+            </div>
+            <form onSubmit={handleLeaveBalanceSave}>
+              <label>
+                <span>Set remaining leaves</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={leaveRemainingInput}
+                  onChange={event => setLeaveRemainingInput(event.target.value)}
+                />
+              </label>
+              <button type="submit" className="btn-primary" disabled={savingLeaveBalance}>
+                {savingLeaveBalance ? "Saving..." : "Update"}
+              </button>
+            </form>
+          </div>
+          <FilterBar from={leaveFrom} to={leaveTo} onFrom={setLeaveFrom} onTo={setLeaveTo} />
+          <LeaveRows requests={filteredLeave} />
+        </section>
+      )}
       {activeTab === "dsu" && <section className="staff-record-section"><div className="staff-record-section-head"><div><h2>Daily stand-up updates</h2><p>Submitted summaries and reported blockers</p></div></div><FilterBar from={dsuFrom} to={dsuTo} onFrom={setDsuFrom} onTo={setDsuTo} /><DsuRows logs={filteredDsu} /></section>}
       {activeTab === "documents" && (
         <section className="staff-record-section">

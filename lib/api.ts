@@ -258,6 +258,8 @@ export type StaffOverview = {
     attendanceDaysLast30Days: number;
     lastAttendanceAt: string | null;
     approvedLeaveDaysThisYear: number;
+    annualLeaveAllowance: number;
+    remainingLeaveDays: number;
     pendingLeaveRequests: number;
     dailyLogCount: number;
     latestDailyLogDate: string | null;
@@ -540,6 +542,13 @@ export async function getStaffOverview(id: number) {
   return request<StaffOverview>(`/users/${id}/overview`);
 }
 
+export async function updateStaffLeaveBalance(userId: number, remainingDays: number) {
+  return request<LeaveBalance>(`/leave-requests/users/${userId}/balance`, {
+    method: "PATCH",
+    body: JSON.stringify({ remainingDays }),
+  });
+}
+
 export async function getProjectsPaged(page = 0, size = 20) {
   const params = new URLSearchParams({ page: String(page), size: String(size) });
   return request<PageResponse<Project>>(`/projects?${params.toString()}`);
@@ -819,8 +828,16 @@ export async function startAttendanceSession() {
   return request<AttendanceSession>("/attendance/start", { method: "POST" });
 }
 
+export async function startTeamMemberAttendanceSession(userId: number) {
+  return request<AttendanceSession>(`/attendance/users/${userId}/active/start`, { method: "POST" });
+}
+
 export async function endAttendanceSession() {
   return request<AttendanceSession>("/attendance/end", { method: "POST" });
+}
+
+export async function endTeamMemberAttendanceSession(userId: number) {
+  return request<AttendanceSession>(`/attendance/users/${userId}/active/end`, { method: "PATCH" });
 }
 
 export async function getMyAttendanceSessions() {

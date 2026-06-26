@@ -11,6 +11,7 @@ import {
   createAttendanceCorrection,
   downloadExport,
   endAttendanceSession,
+  endTeamMemberAttendanceSession,
   getActiveAttendanceSession,
   getAllAttendanceSessions,
   getAttendanceCorrections,
@@ -19,6 +20,7 @@ import {
   getTeamDailyAttendanceSummary,
   rejectAttendanceCorrection,
   startAttendanceSession,
+  startTeamMemberAttendanceSession,
 } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { useAuth } from "@/lib/hooks";
@@ -107,6 +109,10 @@ export default function AttendancePage() {
   const [reviewTarget, setReviewTarget] = useState<{ correction: AttendanceCorrection; action: "approve" | "reject" } | null>(null);
   const [reviewNote, setReviewNote] = useState("");
   const [correctionWorking, setCorrectionWorking] = useState(false);
+  const [startSessionTarget, setStartSessionTarget] = useState<AttendanceDaySummary | null>(null);
+  const [startSessionWorking, setStartSessionWorking] = useState(false);
+  const [closeSessionTarget, setCloseSessionTarget] = useState<AttendanceDaySummary | AttendanceSession | null>(null);
+  const [closeSessionWorking, setCloseSessionWorking] = useState(false);
 
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER";
   const isAdmin = user?.role === "ADMIN";
@@ -233,6 +239,36 @@ export default function AttendancePage() {
     }
   }
 
+  async function confirmCloseTeamSession() {
+    if (!closeSessionTarget) return;
+    setCloseSessionWorking(true);
+    try {
+      await endTeamMemberAttendanceSession(closeSessionTarget.userId);
+      toast.success(`${closeSessionTarget.userFullName}'s session was closed.`);
+      setCloseSessionTarget(null);
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to close team member session");
+    } finally {
+      setCloseSessionWorking(false);
+    }
+  }
+
+  async function confirmStartTeamSession() {
+    if (!startSessionTarget) return;
+    setStartSessionWorking(true);
+    try {
+      await startTeamMemberAttendanceSession(startSessionTarget.userId);
+      toast.success(`${startSessionTarget.userFullName}'s session was started.`);
+      setStartSessionTarget(null);
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to start team member session");
+    } finally {
+      setStartSessionWorking(false);
+    }
+  }
+
   const todaySessions = useMemo(() => {
     const source = canManage ? sessions : sessions.filter(session => localIsoDate(session.startTime) === todayIsoDate());
     return source.filter(session => (filterDate ? localIsoDate(session.startTime) === filterDate : true));
@@ -259,6 +295,7 @@ export default function AttendancePage() {
   const progressPercent = todaySummary
     ? Math.min((todaySummary.totalMinutes / todaySummary.requiredMinutes) * 100, 100)
     : 0;
+  const onApprovedLeaveToday = todaySummary?.status === "ON_LEAVE";
 
   return (
     <div>
@@ -283,14 +320,16 @@ export default function AttendancePage() {
               <div>
                 <div className="text-xs text-muted mb-2">Today</div>
                 <h2 style={{ fontSize: "1.35rem", marginBottom: "10px" }}>
-                  {activeSession ? "You are working now" : "Ready to start a work session"}
+                  {onApprovedLeaveToday ? "You are on approved leave today" : activeSession ? "You are working now" : "Ready to start a work session"}
                 </h2>
                 <p className="text-muted" style={{ lineHeight: 1.5 }}>
-                  Start and stop as many sessions as you need. Breaks are simply the gaps between sessions.
+                  {onApprovedLeaveToday
+                    ? "Attendance cannot be started from your account while approved leave is active. Ask an admin if work attendance must still be recorded."
+                    : "Start and stop as many sessions as you need. Breaks are simply the gaps between sessions."}
                 </p>
                 <button
                   onClick={activeSession ? handleEnd : handleStart}
-                  disabled={working}
+                  disabled={working || onApprovedLeaveToday}
                   style={{
                     marginTop: "24px",
                     background: activeSession ? "var(--danger-color)" : "var(--success-color)",
@@ -300,11 +339,11 @@ export default function AttendancePage() {
                     fontWeight: 700,
                     fontSize: "1rem",
                     border: "none",
-                    cursor: working ? "not-allowed" : "pointer",
-                    opacity: working ? 0.75 : 1,
+                    cursor: working || onApprovedLeaveToday ? "not-allowed" : "pointer",
+                    opacity: working || onApprovedLeaveToday ? 0.75 : 1,
                   }}
                 >
-                  {working ? "Saving..." : activeSession ? "Stop Work" : "Start Work"}
+                  {working ? "Saving..." : onApprovedLeaveToday ? "On Leave" : activeSession ? "Stop Work" : "Start Work"}
                 </button>
               </div>
 
@@ -389,6 +428,7 @@ export default function AttendancePage() {
                     <HeaderCell>Remaining</HeaderCell>
                     <HeaderCell>First Start</HeaderCell>
                     <HeaderCell>Last Stop</HeaderCell>
+                    <HeaderCell>Action</HeaderCell>
                   </tr>
                 </thead>
                 <tbody>
@@ -404,9 +444,20 @@ export default function AttendancePage() {
                       <BodyCell>{formatDuration(summary.remainingMinutes)}</BodyCell>
                       <BodyCell>{formatTime(summary.firstStartTime)}</BodyCell>
                       <BodyCell>{summary.activeSessionStartTime ? "Active" : formatTime(summary.lastEndTime)}</BodyCell>
+                      <BodyCell>
+                        {summary.activeSessionStartTime ? (
+                          <button type="button" className="btn-secondary" style={{ padding: "7px 12px", fontSize: "0.8rem" }} onClick={() => setCloseSessionTarget(summary)}>
+                            Close session
+                          </button>
+                        ) : ["ON_LEAVE", "NO_ACTIVITY"].includes(summary.status) ? (
+                          <button type="button" className="btn-secondary" style={{ padding: "7px 12px", fontSize: "0.8rem" }} onClick={() => setStartSessionTarget(summary)}>
+                            Start session
+                          </button>
+                        ) : <span className="text-muted text-sm">-</span>}
+                      </BodyCell>
                     </tr>
                   ))}
-                  {filteredTeamSummaries.length === 0 && <EmptyRow colSpan={6} label="No team attendance found." />}
+                  {filteredTeamSummaries.length === 0 && <EmptyRow colSpan={7} label="No team attendance found." />}
                 </tbody>
               </Table>
               </div>
@@ -463,6 +514,7 @@ export default function AttendancePage() {
                   <HeaderCell>Start</HeaderCell>
                   <HeaderCell>Stop</HeaderCell>
                   <HeaderCell>Duration</HeaderCell>
+                  {canManage && <HeaderCell>Action</HeaderCell>}
                   {!canManage && <HeaderCell>Correction</HeaderCell>}
                 </tr>
               </thead>
@@ -474,10 +526,19 @@ export default function AttendancePage() {
                     <BodyCell>{formatTime(session.startTime)}</BodyCell>
                     <BodyCell>{session.endTime ? formatTime(session.endTime) : <span style={{ color: "var(--success-color)", fontWeight: 700 }}>Active</span>}</BodyCell>
                     <BodyCell>{session.totalHours ? `${Number(session.totalHours).toFixed(2)} hrs` : "-"}</BodyCell>
+                    {canManage && (
+                      <BodyCell>
+                        {!session.endTime ? (
+                          <button type="button" className="btn-secondary" style={{ padding: "7px 12px", fontSize: "0.8rem" }} onClick={() => setCloseSessionTarget(session)}>
+                            Close session
+                          </button>
+                        ) : <span className="text-muted text-sm">-</span>}
+                      </BodyCell>
+                    )}
                     {!canManage && <BodyCell><button type="button" className="btn-secondary" disabled={!session.endTime} onClick={() => openCorrection(session)}>{session.endTime ? "Request edit" : "End first"}</button></BodyCell>}
                   </tr>
                 ))}
-                {todaySessions.length === 0 && <EmptyRow colSpan={5} label="No sessions found." />}
+                {todaySessions.length === 0 && <EmptyRow colSpan={canManage ? 6 : 5} label="No sessions found." />}
               </tbody>
             </Table>
           </div>
@@ -511,6 +572,32 @@ export default function AttendancePage() {
         onNoteChange={setReviewNote}
         onCancel={() => { setReviewTarget(null); setReviewNote(""); }}
         onConfirm={() => void handleCorrectionReview()}
+      />
+
+      <ActionModal
+        open={startSessionTarget !== null}
+        title="Start attendance session"
+        description={startSessionTarget
+          ? `This will start an attendance session for ${startSessionTarget.userFullName} now. Use this only when attendance must be recorded while the employee is on leave or unable to start it themselves.`
+          : ""}
+        confirmLabel="Start Session"
+        tone="primary"
+        loading={startSessionWorking}
+        onCancel={() => setStartSessionTarget(null)}
+        onConfirm={() => void confirmStartTeamSession()}
+      />
+
+      <ActionModal
+        open={closeSessionTarget !== null}
+        title="Close active session"
+        description={closeSessionTarget
+          ? `This will stop ${closeSessionTarget.userFullName}'s active attendance session now. Active since ${formatTime("activeSessionStartTime" in closeSessionTarget ? closeSessionTarget.activeSessionStartTime : closeSessionTarget.startTime)}.`
+          : ""}
+        confirmLabel="Close Session"
+        tone="danger"
+        loading={closeSessionWorking}
+        onCancel={() => setCloseSessionTarget(null)}
+        onConfirm={() => void confirmCloseTeamSession()}
       />
     </div>
   );
