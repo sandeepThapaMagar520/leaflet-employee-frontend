@@ -799,12 +799,16 @@ export type AttendanceSession = {
   startTime: string;
   endTime: string | null;
   totalHours: number | null;
+  lastHeartbeatAt: string | null;
+  breakStartedAt: string | null;
+  breakMinutes: number;
 };
 
 export type AttendanceDayStatus =
   | "NO_ACTIVITY"
   | "ON_LEAVE"
   | "IN_PROGRESS"
+  | "ON_BREAK"
   | "MISSING_CHECKOUT"
   | "UNDER_HOURS"
   | "COMPLETED_WITH_GRACE"
@@ -834,6 +838,28 @@ export async function startTeamMemberAttendanceSession(userId: number) {
 
 export async function endAttendanceSession() {
   return request<AttendanceSession>("/attendance/end", { method: "POST" });
+}
+
+export async function heartbeatAttendanceSession() {
+  return request<AttendanceSession>("/attendance/heartbeat", { method: "POST" });
+}
+
+export async function startAttendanceBreak() {
+  return request<AttendanceSession>("/attendance/break/start", { method: "POST" });
+}
+
+export async function endAttendanceBreak() {
+  return request<AttendanceSession>("/attendance/break/end", { method: "POST" });
+}
+
+export function endAttendanceSessionOnUnload() {
+  const token = getToken();
+  if (!token) return;
+  void fetch(`${API_BASE_URL}/attendance/end`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    keepalive: true,
+  }).catch(() => {});
 }
 
 export async function endTeamMemberAttendanceSession(userId: number) {

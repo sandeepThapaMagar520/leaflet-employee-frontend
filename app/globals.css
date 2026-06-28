@@ -3689,6 +3689,14 @@ h1, h2, h3, h4 {
   min-width: 0;
 }
 
+.attendance-session-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
 .attendance-team-workflow {
   display: grid;
   gap: 18px;
@@ -3701,7 +3709,7 @@ h1, h2, h3, h4 {
 
 .attendance-metrics {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   overflow: hidden;
   border: 1px solid var(--border-color);
   border-radius: 8px;

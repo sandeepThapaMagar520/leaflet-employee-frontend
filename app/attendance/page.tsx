@@ -11,6 +11,8 @@ import {
   createAttendanceCorrection,
   downloadExport,
   endAttendanceSession,
+  endAttendanceBreak,
+  endAttendanceSessionOnUnload,
   endTeamMemberAttendanceSession,
   getActiveAttendanceSession,
   getAllAttendanceSessions,
@@ -18,7 +20,9 @@ import {
   getMyAttendanceSessions,
   getMyTodayAttendanceSummary,
   getTeamDailyAttendanceSummary,
+  heartbeatAttendanceSession,
   rejectAttendanceCorrection,
+  startAttendanceBreak,
   startAttendanceSession,
   startTeamMemberAttendanceSession,
 } from "@/lib/api";
@@ -31,6 +35,7 @@ const statusLabels: Record<AttendanceDaySummary["status"], string> = {
   NO_ACTIVITY: "No activity",
   ON_LEAVE: "On approved leave",
   IN_PROGRESS: "In progress",
+  ON_BREAK: "On break",
   MISSING_CHECKOUT: "Missing checkout",
   UNDER_HOURS: "Under hours",
   COMPLETED_WITH_GRACE: "Completed with grace",
@@ -41,6 +46,7 @@ const statusColors: Record<AttendanceDaySummary["status"], string> = {
   NO_ACTIVITY: "var(--text-secondary)",
   ON_LEAVE: "var(--info-color)",
   IN_PROGRESS: "var(--info-color)",
+  ON_BREAK: "var(--warning-color)",
   MISSING_CHECKOUT: "var(--danger-color)",
   UNDER_HOURS: "var(--warning-color)",
   COMPLETED_WITH_GRACE: "var(--success-color)",
@@ -98,6 +104,9 @@ export default function AttendancePage() {
   const [corrections, setCorrections] = useState<AttendanceCorrection[]>([]);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
+  const [breakWorking, setBreakWorking] = useState(false);
+  const [breakReminderOpen, setBreakReminderOpen] = useState(false);
+  const [breakReminderSnoozedUntil, setBreakReminderSnoozedUntil] = useState<number | null>(null);
   const [exporting, setExporting] = useState(false);
   const [filterName, setFilterName] = useState("");
   const [filterDate, setFilterDate] = useState(todayIsoDate());
@@ -145,6 +154,44 @@ export default function AttendancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, canManage, filterDate, user?.role]);
 
+  useEffect(() => {
+    if (!activeSession || activeSession.endTime) return;
+    const interval = window.setInterval(() => {
+      void heartbeatAttendanceSession()
+        .then(setActiveSession)
+        .catch(() => {});
+    }, 120_000);
+    return () => window.clearInterval(interval);
+  }, [activeSession]);
+
+  useEffect(() => {
+    if (!activeSession || activeSession.endTime) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "Active working session";
+      return "Active working session";
+    };
+    const handlePageHide = () => endAttendanceSessionOnUnload();
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [activeSession]);
+
+  useEffect(() => {
+    if (!activeSession?.breakStartedAt || activeSession.endTime) {
+      setBreakReminderOpen(false);
+      return;
+    }
+    const breakStartedAt = new Date(activeSession.breakStartedAt).getTime();
+    const reminderAt = Math.max(breakStartedAt + 30 * 60_000, breakReminderSnoozedUntil ?? 0);
+    const delay = Math.max(reminderAt - Date.now(), 0);
+    const timeout = window.setTimeout(() => setBreakReminderOpen(true), delay);
+    return () => window.clearTimeout(timeout);
+  }, [activeSession?.breakStartedAt, activeSession?.endTime, breakReminderSnoozedUntil]);
+
   async function handleStart() {
     try {
       setWorking(true);
@@ -163,11 +210,43 @@ export default function AttendancePage() {
       setWorking(true);
       await endAttendanceSession();
       toast.success("Work session stopped.");
+      setBreakReminderOpen(false);
+      setBreakReminderSnoozedUntil(null);
       await loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to stop work session");
     } finally {
       setWorking(false);
+    }
+  }
+
+  async function handleStartBreak() {
+    try {
+      setBreakWorking(true);
+      await startAttendanceBreak();
+      toast.success("Break started. I will remind you after 30 minutes.");
+      setBreakReminderOpen(false);
+      setBreakReminderSnoozedUntil(null);
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to start break");
+    } finally {
+      setBreakWorking(false);
+    }
+  }
+
+  async function handleEndBreak() {
+    try {
+      setBreakWorking(true);
+      await endAttendanceBreak();
+      toast.success("Break ended. Welcome back.");
+      setBreakReminderOpen(false);
+      setBreakReminderSnoozedUntil(null);
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to end break");
+    } finally {
+      setBreakWorking(false);
     }
   }
 
@@ -278,6 +357,7 @@ export default function AttendancePage() {
     noActivity: teamSummaries.filter(summary => summary.status === "NO_ACTIVITY").length,
     onLeave: teamSummaries.filter(summary => summary.status === "ON_LEAVE").length,
     inProgress: teamSummaries.filter(summary => summary.status === "IN_PROGRESS").length,
+    onBreak: teamSummaries.filter(summary => summary.status === "ON_BREAK").length,
     missingCheckout: teamSummaries.filter(summary => summary.status === "MISSING_CHECKOUT").length,
     underHours: teamSummaries.filter(summary => summary.status === "UNDER_HOURS").length,
     completed: teamSummaries.filter(summary => summary.status === "COMPLETED" || summary.status === "COMPLETED_WITH_GRACE").length,
@@ -296,6 +376,7 @@ export default function AttendancePage() {
     ? Math.min((todaySummary.totalMinutes / todaySummary.requiredMinutes) * 100, 100)
     : 0;
   const onApprovedLeaveToday = todaySummary?.status === "ON_LEAVE";
+  const isOnBreak = Boolean(activeSession?.breakStartedAt);
 
   return (
     <div>
@@ -320,31 +401,44 @@ export default function AttendancePage() {
               <div>
                 <div className="text-xs text-muted mb-2">Today</div>
                 <h2 style={{ fontSize: "1.35rem", marginBottom: "10px" }}>
-                  {onApprovedLeaveToday ? "You are on approved leave today" : activeSession ? "You are working now" : "Ready to start a work session"}
+                  {onApprovedLeaveToday ? "You are on approved leave today" : isOnBreak ? "You are on break" : activeSession ? "You are working now" : "Ready to start a work session"}
                 </h2>
                 <p className="text-muted" style={{ lineHeight: 1.5 }}>
                   {onApprovedLeaveToday
                     ? "Attendance cannot be started from your account while approved leave is active. Ask an admin if work attendance must still be recorded."
+                    : isOnBreak
+                      ? "Break time is paused from worked hours. I will remind you after 30 minutes."
                     : "Start and stop as many sessions as you need. Breaks are simply the gaps between sessions."}
                 </p>
-                <button
-                  onClick={activeSession ? handleEnd : handleStart}
-                  disabled={working || onApprovedLeaveToday}
-                  style={{
-                    marginTop: "24px",
-                    background: activeSession ? "var(--danger-color)" : "var(--success-color)",
-                    color: "white",
-                    padding: "12px 28px",
-                    borderRadius: "8px",
-                    fontWeight: 700,
-                    fontSize: "1rem",
-                    border: "none",
-                    cursor: working || onApprovedLeaveToday ? "not-allowed" : "pointer",
-                    opacity: working || onApprovedLeaveToday ? 0.75 : 1,
-                  }}
-                >
-                  {working ? "Saving..." : onApprovedLeaveToday ? "On Leave" : activeSession ? "Stop Work" : "Start Work"}
-                </button>
+                <div className="attendance-session-actions">
+                  <button
+                    onClick={activeSession ? handleEnd : handleStart}
+                    disabled={working || onApprovedLeaveToday}
+                    style={{
+                      background: activeSession ? "var(--danger-color)" : "var(--success-color)",
+                      color: "white",
+                      padding: "12px 28px",
+                      borderRadius: "8px",
+                      fontWeight: 700,
+                      fontSize: "1rem",
+                      border: "none",
+                      cursor: working || onApprovedLeaveToday ? "not-allowed" : "pointer",
+                      opacity: working || onApprovedLeaveToday ? 0.75 : 1,
+                    }}
+                  >
+                    {working ? "Saving..." : onApprovedLeaveToday ? "On Leave" : activeSession ? "Stop Work" : "Start Work"}
+                  </button>
+                  {activeSession && !onApprovedLeaveToday && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      disabled={breakWorking || working}
+                      onClick={isOnBreak ? () => void handleEndBreak() : () => void handleStartBreak()}
+                    >
+                      {breakWorking ? "Saving..." : isOnBreak ? "End break" : "Take break"}
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div>
@@ -384,6 +478,7 @@ export default function AttendancePage() {
                 <button type="button" className={statusFilter === "NO_ACTIVITY" ? "active" : ""} onClick={() => setStatusFilter("NO_ACTIVITY")}><span>No activity</span><strong>{attendanceMetrics.noActivity}</strong><small>Needs review</small></button>
                 <button type="button" className={statusFilter === "MISSING_CHECKOUT" ? "active" : ""} onClick={() => setStatusFilter("MISSING_CHECKOUT")}><span>Missing checkout</span><strong>{attendanceMetrics.missingCheckout}</strong><small>Open too long</small></button>
                 <button type="button" className={statusFilter === "IN_PROGRESS" ? "active" : ""} onClick={() => setStatusFilter("IN_PROGRESS")}><span>Working now</span><strong>{attendanceMetrics.inProgress}</strong><small>Active sessions</small></button>
+                <button type="button" className={statusFilter === "ON_BREAK" ? "active" : ""} onClick={() => setStatusFilter("ON_BREAK")}><span>On break</span><strong>{attendanceMetrics.onBreak}</strong><small>Paused work</small></button>
                 <button type="button" className={statusFilter === "UNDER_HOURS" ? "active" : ""} onClick={() => setStatusFilter("UNDER_HOURS")}><span>Under hours</span><strong>{attendanceMetrics.underHours}</strong><small>Below grace mark</small></button>
                 <button type="button" className={statusFilter === "ON_LEAVE" ? "active" : ""} onClick={() => setStatusFilter("ON_LEAVE")}><span>On leave</span><strong>{attendanceMetrics.onLeave}</strong><small>Approved absence</small></button>
                 <button type="button" className={statusFilter === "COMPLETED_ANY" ? "active" : ""} onClick={() => setStatusFilter("COMPLETED_ANY")}><span>Completed</span><strong>{attendanceMetrics.completed}</strong><small>Target or grace met</small></button>
@@ -411,6 +506,7 @@ export default function AttendancePage() {
                     <option value="NO_ACTIVITY">No activity</option>
                     <option value="MISSING_CHECKOUT">Missing checkout</option>
                     <option value="IN_PROGRESS">In progress</option>
+                    <option value="ON_BREAK">On break</option>
                     <option value="UNDER_HOURS">Under hours</option>
                     <option value="ON_LEAVE">On approved leave</option>
                     <option value="COMPLETED_ANY">Any completion</option>
@@ -557,6 +653,22 @@ export default function AttendancePage() {
           </form>
         </div>
       )}
+
+      <ActionModal
+        open={breakReminderOpen}
+        title="Still on break?"
+        description="Your break has been active for around 30 minutes. Continue the break if you are still away, or return to work to resume counting attendance time."
+        confirmLabel="Continue break"
+        cancelLabel="Back to work"
+        tone="primary"
+        loading={breakWorking}
+        onCancel={() => void handleEndBreak()}
+        onConfirm={() => {
+          setBreakReminderOpen(false);
+          setBreakReminderSnoozedUntil(Date.now() + 30 * 60_000);
+          toast.info("Break reminder snoozed for 30 minutes.");
+        }}
+      />
 
       <ActionModal
         open={reviewTarget !== null}
