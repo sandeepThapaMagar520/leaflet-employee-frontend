@@ -16,6 +16,7 @@ import {
   endTeamMemberAttendanceSession,
   getActiveAttendanceSession,
   getAllAttendanceSessions,
+  getAppSettings,
   getAttendanceCorrections,
   getMyAttendanceSessions,
   getMyTodayAttendanceSummary,
@@ -107,6 +108,7 @@ export default function AttendancePage() {
   const [breakWorking, setBreakWorking] = useState(false);
   const [breakReminderOpen, setBreakReminderOpen] = useState(false);
   const [breakReminderSnoozedUntil, setBreakReminderSnoozedUntil] = useState<number | null>(null);
+  const [breakReminderMinutes, setBreakReminderMinutes] = useState(30);
   const [exporting, setExporting] = useState(false);
   const [filterName, setFilterName] = useState("");
   const [filterDate, setFilterDate] = useState(todayIsoDate());
@@ -141,6 +143,9 @@ export default function AttendancePage() {
       setTodaySummary(summary);
       setTeamSummaries(teamDaily);
       setCorrections(correctionList);
+      void getAppSettings()
+        .then(settings => setBreakReminderMinutes(settings.attendance.breakReminderMinutes))
+        .catch(() => setBreakReminderMinutes(30));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load attendance data");
     } finally {
@@ -186,11 +191,11 @@ export default function AttendancePage() {
       return;
     }
     const breakStartedAt = new Date(activeSession.breakStartedAt).getTime();
-    const reminderAt = Math.max(breakStartedAt + 30 * 60_000, breakReminderSnoozedUntil ?? 0);
+    const reminderAt = Math.max(breakStartedAt + breakReminderMinutes * 60_000, breakReminderSnoozedUntil ?? 0);
     const delay = Math.max(reminderAt - Date.now(), 0);
     const timeout = window.setTimeout(() => setBreakReminderOpen(true), delay);
     return () => window.clearTimeout(timeout);
-  }, [activeSession?.breakStartedAt, activeSession?.endTime, breakReminderSnoozedUntil]);
+  }, [activeSession?.breakStartedAt, activeSession?.endTime, breakReminderMinutes, breakReminderSnoozedUntil]);
 
   async function handleStart() {
     try {
@@ -224,7 +229,7 @@ export default function AttendancePage() {
     try {
       setBreakWorking(true);
       await startAttendanceBreak();
-      toast.success("Break started. I will remind you after 30 minutes.");
+      toast.success(`Break started. I will remind you after ${breakReminderMinutes} minutes.`);
       setBreakReminderOpen(false);
       setBreakReminderSnoozedUntil(null);
       await loadData();
@@ -407,7 +412,7 @@ export default function AttendancePage() {
                   {onApprovedLeaveToday
                     ? "Attendance cannot be started from your account while approved leave is active. Ask an admin if work attendance must still be recorded."
                     : isOnBreak
-                      ? "Break time is paused from worked hours. I will remind you after 30 minutes."
+                    ? `Break time is paused from worked hours. I will remind you after ${breakReminderMinutes} minutes.`
                     : "Start and stop as many sessions as you need. Breaks are simply the gaps between sessions."}
                 </p>
                 <div className="attendance-session-actions">
@@ -657,7 +662,7 @@ export default function AttendancePage() {
       <ActionModal
         open={breakReminderOpen}
         title="Still on break?"
-        description="Your break has been active for around 30 minutes. Continue the break if you are still away, or return to work to resume counting attendance time."
+        description={`Your break has been active for around ${breakReminderMinutes} minutes. Continue the break if you are still away, or return to work to resume counting attendance time.`}
         confirmLabel="Continue break"
         cancelLabel="Back to work"
         tone="primary"
@@ -665,8 +670,8 @@ export default function AttendancePage() {
         onCancel={() => void handleEndBreak()}
         onConfirm={() => {
           setBreakReminderOpen(false);
-          setBreakReminderSnoozedUntil(Date.now() + 30 * 60_000);
-          toast.info("Break reminder snoozed for 30 minutes.");
+          setBreakReminderSnoozedUntil(Date.now() + breakReminderMinutes * 60_000);
+          toast.info(`Break reminder snoozed for ${breakReminderMinutes} minutes.`);
         }}
       />
 

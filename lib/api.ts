@@ -11,7 +11,7 @@ export type TaskStatus = string;
 export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type ProjectStatus = "PLANNED" | "ACTIVE" | "ON_HOLD" | "COMPLETED";
 export type ProjectNoteType = "TEAM" | "ADMIN_ONLY";
-export type LeaveType = "ANNUAL" | "SICK" | "PERSONAL" | "UNPAID";
+export type LeaveType = "ANNUAL" | "SICK";
 export type LeaveStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
 
 export type LoginPayload = {
@@ -294,6 +294,31 @@ export type LeaveBalance = {
   annualAllowance: number;
   approvedDays: number;
   remainingDays: number;
+  sickAllowance: number;
+  sickApprovedDays: number;
+  sickRemainingDays: number;
+};
+
+export type AppSettings = {
+  leave: {
+    annualLeaveDays: number;
+    sickLeaveDays: number;
+    resetMonth: number;
+    carryForwardAllowed: boolean;
+  };
+  attendance: {
+    requiredMinutes: number;
+    graceMinutes: number;
+    breakReminderMinutes: number;
+    missingCheckoutMinutes: number;
+    heartbeatStaleMinutes: number;
+    adminOverrideEnabled: boolean;
+  };
+  session: {
+    idleTimeoutMinutes: number;
+    warningSeconds: number;
+    browserSessionOnly: boolean;
+  };
 };
 
 type ErrorBody = {
@@ -1158,14 +1183,14 @@ export async function createLeaveRequest(payload: {
   });
 }
 
-export async function approveLeaveRequest(id: number, reviewerNote: string) {
+export async function approveLeaveRequest(id: number, reviewerNote?: string) {
   return request<LeaveRequest>(`/leave-requests/${id}/approve`, {
     method: "PATCH",
     body: JSON.stringify({ reviewerNote }),
   });
 }
 
-export async function rejectLeaveRequest(id: number, reviewerNote: string) {
+export async function rejectLeaveRequest(id: number, reviewerNote?: string) {
   return request<LeaveRequest>(`/leave-requests/${id}/reject`, {
     method: "PATCH",
     body: JSON.stringify({ reviewerNote }),
@@ -1174,4 +1199,15 @@ export async function rejectLeaveRequest(id: number, reviewerNote: string) {
 
 export async function cancelLeaveRequest(id: number) {
   return request<LeaveRequest>(`/leave-requests/${id}/cancel`, { method: "PATCH" });
+}
+
+export async function getAppSettings() {
+  return request<AppSettings>("/settings");
+}
+
+export async function updateAppSettings(payload: AppSettings) {
+  return request<AppSettings>("/settings", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }

@@ -10,6 +10,7 @@ import {
   LeaveBalance,
   LeaveRequest,
   LeaveStatus,
+  LeaveType,
   rejectLeaveRequest,
 } from "@/lib/api";
 import ActionModal from "@/app/components/ActionModal";
@@ -17,7 +18,10 @@ import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 
 const statusOptions: Array<LeaveStatus | "ALL"> = ["ALL", "PENDING", "APPROVED", "REJECTED", "CANCELLED"];
-const DEFAULT_LEAVE_TYPE = "ANNUAL";
+const leaveTypeLabels: Record<LeaveType, string> = {
+  ANNUAL: "Annual",
+  SICK: "Sick",
+};
 
 function localDateKey(date = new Date()) {
   const year = date.getFullYear();
@@ -64,6 +68,7 @@ export default function LeavePage() {
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
   const [loading, setLoading] = useState(true);
   const [subject, setSubject] = useState("");
+  const [leaveType, setLeaveType] = useState<LeaveType>("ANNUAL");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [reason, setReason] = useState("");
@@ -111,12 +116,13 @@ export default function LeavePage() {
     setSubmitting(true);
     try {
       await createLeaveRequest({
-        leaveType: DEFAULT_LEAVE_TYPE,
+        leaveType,
         startDate,
         endDate,
         reason: encodeLeaveReason(subject, reason),
       });
       setSubject("");
+      setLeaveType("ANNUAL");
       setStartDate("");
       setEndDate("");
       setReason("");
@@ -130,7 +136,7 @@ export default function LeavePage() {
   }
 
   async function confirmReview() {
-    if (!reviewTarget || !reviewNote.trim()) return;
+    if (!reviewTarget) return;
     setModalWorking(true);
     try {
       if (reviewTarget.action === "approve") {
@@ -230,18 +236,24 @@ export default function LeavePage() {
       </div>
 
       {canSubmitLeave && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "16px", marginBottom: "24px" }}>
+        <div className="leave-balance-grid">
           <div className="glass-card" style={{ padding: "18px" }}>
             <div className="text-sm text-muted mb-2">Annual Allowance</div>
-            <div style={{ fontSize: "1.5rem", fontWeight: 700 }}>{balance?.annualAllowance ?? 20} days</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: 700 }}>{balance?.annualAllowance ?? 21} days</div>
+            <small className="text-muted">{balance?.approvedDays ?? 0} used</small>
           </div>
           <div className="glass-card" style={{ padding: "18px" }}>
-            <div className="text-sm text-muted mb-2">Approved</div>
-            <div style={{ fontSize: "1.5rem", fontWeight: 700 }}>{balance?.approvedDays ?? 0} days</div>
+            <div className="text-sm text-muted mb-2">Annual Remaining</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--success-color)" }}>{balance?.remainingDays ?? 21} days</div>
           </div>
           <div className="glass-card" style={{ padding: "18px" }}>
-            <div className="text-sm text-muted mb-2">Remaining</div>
-            <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--success-color)" }}>{balance?.remainingDays ?? 20} days</div>
+            <div className="text-sm text-muted mb-2">Sick Allowance</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: 700 }}>{balance?.sickAllowance ?? 12} days</div>
+            <small className="text-muted">{balance?.sickApprovedDays ?? 0} used</small>
+          </div>
+          <div className="glass-card" style={{ padding: "18px" }}>
+            <div className="text-sm text-muted mb-2">Sick Remaining</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--info-color)" }}>{balance?.sickRemainingDays ?? 12} days</div>
           </div>
         </div>
       )}
@@ -269,6 +281,13 @@ export default function LeavePage() {
                   required
                   placeholder="Example: Medical appointment leave"
                 />
+              </label>
+              <label className="leave-form-field">
+                <span>Leave category</span>
+                <select value={leaveType} onChange={event => setLeaveType(event.target.value as LeaveType)}>
+                  <option value="ANNUAL">Annual leave</option>
+                  <option value="SICK">Sick leave</option>
+                </select>
               </label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                 <label className="leave-form-field">
@@ -329,7 +348,7 @@ export default function LeavePage() {
                     <div>
                       <div style={{ fontWeight: 700 }}>{decoded.subject}</div>
                       <div className="text-sm text-muted mt-1">
-                        {request.userFullName} · {formatDate(request.startDate)} to {formatDate(request.endDate)} · {request.requestedDays} day{request.requestedDays !== 1 ? "s" : ""}
+                        {request.userFullName} · {leaveTypeLabels[request.leaveType]} leave · {formatDate(request.startDate)} to {formatDate(request.endDate)} · {request.requestedDays} day{request.requestedDays !== 1 ? "s" : ""}
                       </div>
                     </div>
                     <span className={`badge ${badgeClass(request.status)}`}>{request.status}</span>
@@ -369,13 +388,12 @@ export default function LeavePage() {
       <ActionModal
         open={reviewTarget !== null}
         title={reviewTarget?.action === "approve" ? "Approve Leave" : "Reject Leave"}
-        description={reviewTarget?.action === "approve" ? "Add a short approval note for this leave request." : "Share the reason this leave request is being rejected."}
+        description={reviewTarget?.action === "approve" ? "You can add an optional approval note for this leave request." : "You can add an optional reason for rejecting this leave request."}
         confirmLabel={reviewTarget?.action === "approve" ? "Approve" : "Reject"}
         tone={reviewTarget?.action === "reject" ? "danger" : "primary"}
-        noteLabel={reviewTarget?.action === "approve" ? "Approval Note" : "Rejection Reason"}
-        notePlaceholder="Write a note for the employee..."
+        noteLabel={reviewTarget?.action === "approve" ? "Approval note (optional)" : "Rejection reason (optional)"}
+        notePlaceholder="Optional note for the employee..."
         noteValue={reviewNote}
-        noteRequired
         loading={modalWorking}
         onNoteChange={setReviewNote}
         onCancel={() => { setReviewTarget(null); setReviewNote(""); }}

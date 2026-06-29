@@ -28,6 +28,7 @@ export default function Sidebar() {
 
   if (userRole === "ADMIN") {
     links.push({ href: "/users", label: "Staff Management", icon: "👥" });
+    links.push({ href: "/settings", label: "Settings", icon: "⚙️" });
   }
 
   const brandName = loading ? "Leaflet" : userRole === "ADMIN" || userRole === "MANAGER" ? "Leaflet Admin" : "Leaflet Employee";

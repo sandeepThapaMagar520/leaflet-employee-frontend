@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import ActionModal from "@/app/components/ActionModal";
-import { getActiveAttendanceSession } from "@/lib/api";
+import { getActiveAttendanceSession, getAppSettings } from "@/lib/api";
 import { clearAuthSession } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 
@@ -15,8 +15,29 @@ export default function SessionManager() {
   const toast = useToast();
   const lastActivityRef = useRef(Date.now());
   const activeAttendanceRef = useRef(false);
+  const idleTimeoutMsRef = useRef(IDLE_TIMEOUT_MS);
+  const warningMsRef = useRef(LOGOUT_WARNING_MS);
   const [warningOpen, setWarningOpen] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(LOGOUT_WARNING_MS / 1000);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadRuntimeSettings() {
+      try {
+        const settings = await getAppSettings();
+        if (cancelled) return;
+        idleTimeoutMsRef.current = Math.max(settings.session.idleTimeoutMinutes, 1) * 60 * 1000;
+        warningMsRef.current = Math.max(settings.session.warningSeconds, 10) * 1000;
+      } catch {
+        idleTimeoutMsRef.current = IDLE_TIMEOUT_MS;
+        warningMsRef.current = LOGOUT_WARNING_MS;
+      }
+    }
+    void loadRuntimeSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     function markActivity() {
@@ -57,13 +78,14 @@ export default function SessionManager() {
       }
 
       const idleFor = Date.now() - lastActivityRef.current;
-      const remaining = IDLE_TIMEOUT_MS - idleFor;
+      const warningMs = warningMsRef.current;
+      const remaining = idleTimeoutMsRef.current - idleFor;
       if (remaining <= 0) {
         clearAuthSession();
         window.location.href = "/login?reason=idle";
         return;
       }
-      if (remaining <= LOGOUT_WARNING_MS) {
+      if (remaining <= warningMs) {
         setSecondsLeft(Math.max(Math.ceil(remaining / 1000), 0));
         setWarningOpen(true);
       }
