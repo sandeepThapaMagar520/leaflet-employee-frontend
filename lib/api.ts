@@ -1,4 +1,4 @@
-import { handleUnauthorized } from "./auth";
+import { getAccessToken, handleUnauthorized } from "./auth";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080/api/v1";
 
@@ -303,7 +303,7 @@ type ErrorBody = {
 };
 
 function getToken() {
-  return typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+  return getAccessToken();
 }
 
 function statusFallbackMessage(status: number, path: string): string {

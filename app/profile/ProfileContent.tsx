@@ -30,6 +30,7 @@ import {
   verifyEmailChange,
 } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
+import { setStoredAuth, updateStoredAuthUser } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 
 type Tab = "personal" | "security" | "preferences" | "documents" | "work";
@@ -197,11 +198,7 @@ export default function ProfileContent() {
         timezone: timezone.trim(),
       });
       setProfile(updated);
-      const raw = localStorage.getItem("auth_user");
-      if (raw) {
-        const stored = JSON.parse(raw);
-        localStorage.setItem("auth_user", JSON.stringify({ ...stored, fullName: updated.fullName }));
-      }
+      updateStoredAuthUser(stored => ({ ...stored, fullName: updated.fullName }));
       toast.success("Profile updated.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update profile");
@@ -218,11 +215,7 @@ export default function ProfileContent() {
       const uploaded = await uploadFile(file);
       const updated = await updateMyProfile({ profilePhotoUrl: uploaded.url });
       setProfile(updated);
-      const raw = localStorage.getItem("auth_user");
-      if (raw) {
-        const stored = JSON.parse(raw);
-        localStorage.setItem("auth_user", JSON.stringify({ ...stored, profilePhotoUrl: updated.profilePhotoUrl }));
-      }
+      updateStoredAuthUser(stored => ({ ...stored, profilePhotoUrl: updated.profilePhotoUrl }));
       toast.success("Profile photo updated.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to upload photo");
@@ -286,8 +279,7 @@ export default function ProfileContent() {
     setSavingEmail(true);
     try {
       const result = await verifyEmailChange(emailOtp);
-      localStorage.setItem("access_token", result.accessToken);
-      localStorage.setItem("auth_user", JSON.stringify(result));
+      setStoredAuth(result.accessToken, result);
       setProfile(current => current ? { ...current, email: result.email, emailVerified: true } : current);
       setNewEmail("");
       setEmailOtp("");

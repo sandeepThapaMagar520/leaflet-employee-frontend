@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { login } from "@/lib/api";
-import { setAuthSession } from "@/lib/auth";
+import { setStoredAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -29,9 +29,7 @@ export default function LoginPage() {
 
     try {
       const result = await login({ email: trimmedEmail, password });
-      localStorage.setItem("access_token", result.accessToken);
-      localStorage.setItem("auth_user", JSON.stringify(result));
-      setAuthSession();
+      setStoredAuth(result.accessToken, result);
       if (result.mustChangePassword) {
         toast.info("Signed in. Please update your password to continue.");
         router.push("/profile?tab=security");

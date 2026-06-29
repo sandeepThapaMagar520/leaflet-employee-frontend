@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { clearAuthSession, getStoredAuthUser } from "./auth";
 
 export type Role = "ADMIN" | "MANAGER" | "EMPLOYEE";
 
@@ -21,9 +22,10 @@ export function useAuth(allowedRoles?: Role[]) {
 
   useEffect(() => {
     const allowedRoleList = allowedRolesKey ? allowedRolesKey.split("|") as Role[] : null;
-    const raw = localStorage.getItem("auth_user");
+    const raw = getStoredAuthUser();
     if (!raw) {
-      router.push("/login");
+      clearAuthSession();
+      router.replace("/login");
       return;
     }
 
@@ -32,10 +34,11 @@ export function useAuth(allowedRoles?: Role[]) {
       setUser(parsed);
 
       if (allowedRoleList && !allowedRoleList.includes(parsed.role)) {
-        router.push("/dashboard");
+        router.replace("/dashboard");
       }
     } catch {
-      router.push("/login");
+      clearAuthSession();
+      router.replace("/login");
     } finally {
       setLoading(false);
     }

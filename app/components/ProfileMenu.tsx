@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { clearAuthSession } from "@/lib/auth";
+import { clearAuthSession, getStoredAuthUser, updateStoredAuthUser } from "@/lib/auth";
 import { getMyProfile, Profile, resendVerificationEmail } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 
@@ -28,7 +28,7 @@ export default function ProfileMenu() {
   const [resending, setResending] = useState(false);
 
   useEffect(() => {
-    const raw = localStorage.getItem("auth_user");
+    const raw = getStoredAuthUser();
     if (raw) {
       try {
         setUser(JSON.parse(raw) as StoredUser);
@@ -42,7 +42,7 @@ export default function ProfileMenu() {
     try {
       const data = await getMyProfile();
       setProfile(data);
-      const raw = localStorage.getItem("auth_user");
+      const raw = getStoredAuthUser();
       if (raw) {
         const stored = JSON.parse(raw) as StoredUser;
         const updated = {
@@ -52,11 +52,11 @@ export default function ProfileMenu() {
           profilePhotoUrl: data.profilePhotoUrl,
           emailVerified: data.emailVerified,
         };
-        localStorage.setItem("auth_user", JSON.stringify(updated));
+        updateStoredAuthUser(() => updated as unknown as Record<string, unknown>);
         setUser(updated);
       }
     } catch {
-      // ignore — menu still works from localStorage
+      // ignore — menu still works from the stored session snapshot
     }
   }, []);
 
