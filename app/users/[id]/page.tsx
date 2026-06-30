@@ -226,7 +226,8 @@ export default function StaffRecordPage() {
   const [documentNote, setDocumentNote] = useState("");
   const [documentUploadStep, setDocumentUploadStep] = useState<"idle" | "uploading" | "saving">("idle");
   const [savingDocument, setSavingDocument] = useState(false);
-  const [leaveRemainingInput, setLeaveRemainingInput] = useState("");
+  const [annualLeaveRemainingInput, setAnnualLeaveRemainingInput] = useState("");
+  const [sickLeaveRemainingInput, setSickLeaveRemainingInput] = useState("");
   const [savingLeaveBalance, setSavingLeaveBalance] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -240,7 +241,8 @@ export default function StaffRecordPage() {
     getStaffOverview(staffId)
       .then(nextRecord => {
         setRecord(nextRecord);
-        setLeaveRemainingInput(String(nextRecord.summary.remainingLeaveDays));
+        setAnnualLeaveRemainingInput(String(nextRecord.summary.remainingLeaveDays));
+        setSickLeaveRemainingInput(String(nextRecord.summary.sickRemainingLeaveDays));
       })
       .catch(error => toast.error(error instanceof Error ? error.message : "Failed to load staff records"))
       .finally(() => setLoading(false));
@@ -312,20 +314,22 @@ export default function StaffRecordPage() {
     const staffId = Number(params.id);
     const nextRecord = await getStaffOverview(staffId);
     setRecord(nextRecord);
-    setLeaveRemainingInput(String(nextRecord.summary.remainingLeaveDays));
+    setAnnualLeaveRemainingInput(String(nextRecord.summary.remainingLeaveDays));
+    setSickLeaveRemainingInput(String(nextRecord.summary.sickRemainingLeaveDays));
   }
 
   async function handleLeaveBalanceSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!record) return;
-    const remainingDays = Number(leaveRemainingInput);
-    if (!Number.isInteger(remainingDays) || remainingDays < 0) {
-      toast.error("Remaining leave days must be a whole number.");
+    const annualRemainingDays = Number(annualLeaveRemainingInput);
+    const sickRemainingDays = Number(sickLeaveRemainingInput);
+    if (!Number.isInteger(annualRemainingDays) || annualRemainingDays < 0 || !Number.isInteger(sickRemainingDays) || sickRemainingDays < 0) {
+      toast.error("Remaining leave days must be whole numbers.");
       return;
     }
     setSavingLeaveBalance(true);
     try {
-      await updateStaffLeaveBalance(record.staff.id, remainingDays);
+      await updateStaffLeaveBalance(record.staff.id, annualRemainingDays, sickRemainingDays);
       toast.success("Leave balance updated.");
       await refreshRecord();
     } catch (error) {
@@ -520,22 +524,42 @@ export default function StaffRecordPage() {
             <div>
               <span>Annual allowance</span>
               <strong>{summary.annualLeaveAllowance} days</strong>
-              <small>{summary.approvedLeaveDaysThisYear} approved this year</small>
+              <small>{summary.approvedAnnualLeaveDaysThisYear} annual days approved this year</small>
             </div>
             <div>
-              <span>Remaining pocket</span>
+              <span>Annual remaining</span>
               <strong>{summary.remainingLeaveDays} days</strong>
-              <small>Admin-adjustable balance</small>
+              <small>Admin-adjustable annual pocket</small>
+            </div>
+            <div>
+              <span>Sick allowance</span>
+              <strong>{summary.sickLeaveAllowance} days</strong>
+              <small>{summary.approvedSickLeaveDaysThisYear} sick days approved this year</small>
+            </div>
+            <div>
+              <span>Sick remaining</span>
+              <strong>{summary.sickRemainingLeaveDays} days</strong>
+              <small>Admin-adjustable sick pocket</small>
             </div>
             <form onSubmit={handleLeaveBalanceSave}>
               <label>
-                <span>Set remaining leaves</span>
+                <span>Set annual remaining</span>
                 <input
                   type="number"
                   min={0}
                   step={1}
-                  value={leaveRemainingInput}
-                  onChange={event => setLeaveRemainingInput(event.target.value)}
+                  value={annualLeaveRemainingInput}
+                  onChange={event => setAnnualLeaveRemainingInput(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Set sick remaining</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={sickLeaveRemainingInput}
+                  onChange={event => setSickLeaveRemainingInput(event.target.value)}
                 />
               </label>
               <button type="submit" className="btn-primary" disabled={savingLeaveBalance}>

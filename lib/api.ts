@@ -258,8 +258,12 @@ export type StaffOverview = {
     attendanceDaysLast30Days: number;
     lastAttendanceAt: string | null;
     approvedLeaveDaysThisYear: number;
+    approvedAnnualLeaveDaysThisYear: number;
+    approvedSickLeaveDaysThisYear: number;
     annualLeaveAllowance: number;
     remainingLeaveDays: number;
+    sickLeaveAllowance: number;
+    sickRemainingLeaveDays: number;
     pendingLeaveRequests: number;
     dailyLogCount: number;
     latestDailyLogDate: string | null;
@@ -567,10 +571,10 @@ export async function getStaffOverview(id: number) {
   return request<StaffOverview>(`/users/${id}/overview`);
 }
 
-export async function updateStaffLeaveBalance(userId: number, remainingDays: number) {
+export async function updateStaffLeaveBalance(userId: number, annualRemainingDays: number, sickRemainingDays?: number) {
   return request<LeaveBalance>(`/leave-requests/users/${userId}/balance`, {
     method: "PATCH",
-    body: JSON.stringify({ remainingDays }),
+    body: JSON.stringify({ annualRemainingDays, sickRemainingDays }),
   });
 }
 
