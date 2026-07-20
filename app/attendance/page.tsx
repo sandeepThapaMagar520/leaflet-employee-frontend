@@ -38,9 +38,11 @@ const statusLabels: Record<AttendanceDaySummary["status"], string> = {
   IN_PROGRESS: "In progress",
   ON_BREAK: "On break",
   MISSING_CHECKOUT: "Missing checkout",
+  WORKED_ON_LEAVE: "Worked on approved leave",
   UNDER_HOURS: "Under hours",
   COMPLETED_WITH_GRACE: "Completed with grace",
   COMPLETED: "Completed",
+  OVERTIME: "Overtime",
 };
 
 const statusColors: Record<AttendanceDaySummary["status"], string> = {
@@ -49,9 +51,11 @@ const statusColors: Record<AttendanceDaySummary["status"], string> = {
   IN_PROGRESS: "var(--info-color)",
   ON_BREAK: "var(--warning-color)",
   MISSING_CHECKOUT: "var(--danger-color)",
+  WORKED_ON_LEAVE: "var(--warning-color)",
   UNDER_HOURS: "var(--warning-color)",
   COMPLETED_WITH_GRACE: "var(--success-color)",
   COMPLETED: "var(--success-color)",
+  OVERTIME: "var(--info-color)",
 };
 
 function todayIsoDate() {
@@ -124,6 +128,7 @@ export default function AttendancePage() {
   const [startSessionWorking, setStartSessionWorking] = useState(false);
   const [closeSessionTarget, setCloseSessionTarget] = useState<AttendanceDaySummary | AttendanceSession | null>(null);
   const [closeSessionWorking, setCloseSessionWorking] = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
 
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER";
   const isAdmin = user?.role === "ADMIN";
@@ -298,6 +303,7 @@ export default function AttendancePage() {
       await loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to submit attendance correction");
+      await loadData();
     } finally {
       setCorrectionWorking(false);
     }
@@ -318,36 +324,41 @@ export default function AttendancePage() {
       await loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to review attendance correction");
+      await loadData();
     } finally {
       setCorrectionWorking(false);
     }
   }
 
   async function confirmCloseTeamSession() {
-    if (!closeSessionTarget) return;
+    if (!closeSessionTarget || !overrideReason.trim()) return;
     setCloseSessionWorking(true);
     try {
-      await endTeamMemberAttendanceSession(closeSessionTarget.userId);
+      await endTeamMemberAttendanceSession(closeSessionTarget.userId, overrideReason.trim());
       toast.success(`${closeSessionTarget.userFullName}'s session was closed.`);
       setCloseSessionTarget(null);
+      setOverrideReason("");
       await loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to close team member session");
+      await loadData();
     } finally {
       setCloseSessionWorking(false);
     }
   }
 
   async function confirmStartTeamSession() {
-    if (!startSessionTarget) return;
+    if (!startSessionTarget || !overrideReason.trim()) return;
     setStartSessionWorking(true);
     try {
-      await startTeamMemberAttendanceSession(startSessionTarget.userId);
+      await startTeamMemberAttendanceSession(startSessionTarget.userId, overrideReason.trim());
       toast.success(`${startSessionTarget.userFullName}'s session was started.`);
       setStartSessionTarget(null);
+      setOverrideReason("");
       await loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to start team member session");
+      await loadData();
     } finally {
       setStartSessionWorking(false);
     }
@@ -365,15 +376,15 @@ export default function AttendancePage() {
     onBreak: teamSummaries.filter(summary => summary.status === "ON_BREAK").length,
     missingCheckout: teamSummaries.filter(summary => summary.status === "MISSING_CHECKOUT").length,
     underHours: teamSummaries.filter(summary => summary.status === "UNDER_HOURS").length,
-    completed: teamSummaries.filter(summary => summary.status === "COMPLETED" || summary.status === "COMPLETED_WITH_GRACE").length,
+    completed: teamSummaries.filter(summary => ["COMPLETED", "COMPLETED_WITH_GRACE", "OVERTIME"].includes(summary.status)).length,
   }), [teamSummaries]);
 
   const filteredTeamSummaries = teamSummaries.filter(summary => {
     const matchesName = summary.userFullName.toLowerCase().includes(filterName.toLowerCase());
     const matchesStatus = statusFilter === "ALL"
-      || (statusFilter === "EXCEPTIONS" ? ["NO_ACTIVITY", "MISSING_CHECKOUT", "UNDER_HOURS"].includes(summary.status) : summary.status === statusFilter);
+      || (statusFilter === "EXCEPTIONS" ? ["NO_ACTIVITY", "MISSING_CHECKOUT", "UNDER_HOURS", "WORKED_ON_LEAVE"].includes(summary.status) : summary.status === statusFilter);
     const matchesCombinedCompleted = statusFilter === "COMPLETED_ANY"
-      && (summary.status === "COMPLETED" || summary.status === "COMPLETED_WITH_GRACE");
+      && ["COMPLETED", "COMPLETED_WITH_GRACE", "OVERTIME"].includes(summary.status);
     return matchesName && (matchesStatus || matchesCombinedCompleted);
   });
 
@@ -516,6 +527,8 @@ export default function AttendancePage() {
                     <option value="ON_LEAVE">On approved leave</option>
                     <option value="COMPLETED_ANY">Any completion</option>
                     <option value="COMPLETED_WITH_GRACE">Completed with grace</option>
+                    <option value="OVERTIME">Overtime</option>
+                    <option value="WORKED_ON_LEAVE">Worked on approved leave</option>
                     <option value="COMPLETED">Completed</option>
                   </select>
                 </div>
@@ -583,7 +596,7 @@ export default function AttendancePage() {
                       <BodyCell>{correction.reason}</BodyCell>
                       <BodyCell><span className={correction.status === "APPROVED" ? "badge-done" : correction.status === "REJECTED" ? "badge-blocked" : "badge-in-progress"}>{correction.status.toLowerCase()}</span></BodyCell>
                       <BodyCell>
-                        {correction.status === "PENDING" ? <div className="attendance-review-actions"><button type="button" className="btn-primary" onClick={() => setReviewTarget({ correction, action: "approve" })}>Approve</button><button type="button" className="btn-secondary" onClick={() => setReviewTarget({ correction, action: "reject" })}>Reject</button></div> : <span className="text-muted text-sm">{correction.reviewerFullName ?? "Reviewed"}</span>}
+                        {correction.status === "PENDING" && correction.canReview ? <div className="attendance-review-actions"><button type="button" className="btn-primary" onClick={() => setReviewTarget({ correction, action: "approve" })}>Approve</button><button type="button" className="btn-secondary" onClick={() => setReviewTarget({ correction, action: "reject" })}>Reject</button></div> : <span className="text-muted text-sm">{correction.status === "PENDING" ? "Awaiting review" : correction.reviewerFullName ?? "Reviewed"}</span>}
                       </BodyCell>
                     </tr>
                   ))}
@@ -698,9 +711,14 @@ export default function AttendancePage() {
           ? `This will start an attendance session for ${startSessionTarget.userFullName} now. Use this only when attendance must be recorded while the employee is on leave or unable to start it themselves.`
           : ""}
         confirmLabel="Start Session"
+        noteLabel="Override reason"
+        notePlaceholder="Why must this session be started on the employee's behalf?"
+        noteValue={overrideReason}
+        noteRequired
+        onNoteChange={setOverrideReason}
         tone="primary"
         loading={startSessionWorking}
-        onCancel={() => setStartSessionTarget(null)}
+        onCancel={() => { setStartSessionTarget(null); setOverrideReason(""); }}
         onConfirm={() => void confirmStartTeamSession()}
       />
 
@@ -711,9 +729,14 @@ export default function AttendancePage() {
           ? `This will stop ${closeSessionTarget.userFullName}'s active attendance session now. Active since ${formatTime("activeSessionStartTime" in closeSessionTarget ? closeSessionTarget.activeSessionStartTime : closeSessionTarget.startTime)}.`
           : ""}
         confirmLabel="Close Session"
+        noteLabel="Override reason"
+        notePlaceholder="Why must this session be closed on the employee's behalf?"
+        noteValue={overrideReason}
+        noteRequired
+        onNoteChange={setOverrideReason}
         tone="danger"
         loading={closeSessionWorking}
-        onCancel={() => setCloseSessionTarget(null)}
+        onCancel={() => { setCloseSessionTarget(null); setOverrideReason(""); }}
         onConfirm={() => void confirmCloseTeamSession()}
       />
     </div>

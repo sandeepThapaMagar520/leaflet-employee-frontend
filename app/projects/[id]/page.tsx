@@ -8,7 +8,7 @@ import {
   getProjectPayments, createProjectPayment, ProjectPayment,
   PaymentAttachment, updateProjectPaymentAttachments,
   getProjectNotes, createProjectNote, updateProjectNote, deleteProjectNote,
-  ProjectNote, ProjectNoteType, uploadToCloudinary,
+  ProjectNote, ProjectNoteType, uploadFile, downloadMediaAsset,
   getTaskComments, createTaskComment, TaskComment,
   getProjectMilestones, createProjectMilestone, completeProjectMilestone, reopenProjectMilestone, deleteProjectMilestone, ProjectMilestone,
   getUsers, User, ProjectMemberPermission,
@@ -96,23 +96,19 @@ const ADDITIONAL_DETAIL_SECTIONS = [
 ] as const;
 
 type NoteAttachment = {
-  url: string;
+  mediaAssetId: string;
   fileName: string;
   fileType: string;
   kind: "image" | "document";
 };
 
-type StoredAttachment = string | NoteAttachment;
-
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_ATTACHMENTS = 10;
 const ACCEPTED_MIME_TYPES = new Set([
-  "image/jpeg", "image/png", "image/gif", "image/webp",
+  "image/jpeg", "image/png",
   "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]);
-const FILE_INPUT_ACCEPT = ".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,image/*,application/pdf";
+const FILE_INPUT_ACCEPT = ".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf";
 const PAYMENT_BILL_ACCEPT = ".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf";
 const MAX_PAYMENT_BILLS = 5;
 const PAYMENT_BILL_MIME_TYPES = new Set(["image/jpeg", "image/png", "application/pdf"]);
@@ -121,24 +117,13 @@ function fileKind(mime: string): "image" | "document" {
   return mime.startsWith("image/") ? "image" : "document";
 }
 
-function normalizeAttachments(raw: StoredAttachment[]): NoteAttachment[] {
-  return raw.map(item => {
-    if (typeof item === "string") {
-      const isImage = /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(item) || item.includes("/image/upload/");
-      return {
-        url: item,
-        fileName: decodeURIComponent(item.split("/").pop()?.split("?")[0] || "attachment"),
-        fileType: isImage ? "image/jpeg" : "application/octet-stream",
-        kind: isImage ? "image" : "document",
-      };
-    }
-    return {
-      url: item.url,
-      fileName: item.fileName,
-      fileType: item.fileType,
-      kind: item.kind ?? fileKind(item.fileType),
-    };
-  });
+function normalizeAttachments(raw: NoteAttachment[]): NoteAttachment[] {
+  return raw.filter(item => Boolean(item.mediaAssetId)).map(item => ({
+    mediaAssetId: item.mediaAssetId,
+    fileName: item.fileName,
+    fileType: item.fileType,
+    kind: item.kind ?? fileKind(item.fileType),
+  }));
 }
 
 function encodeNote(data: {
@@ -167,7 +152,7 @@ function decodeNote(content: string): {
       category?: string;
       text?: string;
       date?: string;
-      attachments?: StoredAttachment[];
+      attachments?: NoteAttachment[];
       detailTitle?: string;
       detailCost?: string;
       isDetailProfile?: boolean;
@@ -190,12 +175,23 @@ function decodeNote(content: string): {
   return { category: "GENERAL", date: "", text: content, attachments: [] };
 }
 
+function decodeProjectNote(note: ProjectNote) {
+  const decoded = decodeNote(note.content);
+  decoded.attachments = (note.attachments ?? []).map(attachment => ({
+    mediaAssetId: attachment.mediaAssetId,
+    fileName: attachment.fileName,
+    fileType: attachment.contentType,
+    kind: fileKind(attachment.contentType),
+  }));
+  return decoded;
+}
+
 function categoryMeta(cat: NoteCategory) {
   return NOTE_CATEGORIES.find(c => c.value === cat) ?? NOTE_CATEGORIES.find(c => c.value === "GENERAL")!;
 }
 
 function isDetailProfileNote(note: ProjectNote) {
-  return decodeNote(note.content).isDetailProfile === true;
+  return decodeProjectNote(note).isDetailProfile === true;
 }
 
 function detailProfileFromNotes(notes: ProjectNote[], category: AdditionalDetailKey) {
@@ -204,7 +200,7 @@ function detailProfileFromNotes(notes: ProjectNote[], category: AdditionalDetail
     return decoded.category === category && decoded.isDetailProfile;
   });
   if (!note) return null;
-  const decoded = decodeNote(note.content);
+  const decoded = decodeProjectNote(note);
   return {
     noteId: note.id,
     title: decoded.detailTitle ?? "",
@@ -237,7 +233,6 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
   // project header edits
   const [isSaving,    setIsSaving]    = useState(false);
-  const [editDocs,    setEditDocs]    = useState("");
   const [editBudget,  setEditBudget]  = useState("");
   const [editStatus,  setEditStatus]  = useState<ProjectStatus>("PLANNED");
   const [editServerDetails, setEditServerDetails] = useState("");
@@ -262,6 +257,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   // payment form
   const [payAmount,      setPayAmount]      = useState("");
   const [payWhen,        setPayWhen]        = useState("");
+  const [payIdempotencyKey, setPayIdempotencyKey] = useState(() => crypto.randomUUID());
   const [payNote,        setPayNote]        = useState("");
   const [payAttachments, setPayAttachments] = useState<PaymentAttachment[]>([]);
   const [uploadingPaymentBills, setUploadingPaymentBills] = useState(false);
@@ -296,7 +292,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [activeTab, setActiveTab] = useState<"OVERVIEW"|"TEAM"|"MILESTONES"|"TASKS"|"FINANCES"|"ADDITIONAL_DETAILS"|"NOTES">("OVERVIEW");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [commentText, setCommentText] = useState("");
-  const [commentAttachment, setCommentAttachment] = useState<{ url: string; name: string } | null>(null);
+  const [commentAttachment, setCommentAttachment] = useState<{ mediaAssetId: string; name: string } | null>(null);
   const [loadingComments, setLoadingComments] = useState(false);
   const [savingComment, setSavingComment] = useState(false);
   const [uploadingCommentFile, setUploadingCommentFile] = useState(false);
@@ -338,7 +334,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     try {
       const data = await getProject(projectId);
       setProject(data);
-      setEditDocs(data.documentUrl || "");
+      if (!data.canManageProject) {
+        return;
+      }
       setEditBudget(data.budgetAmount ? String(data.budgetAmount) : "");
       setEditStatus(data.status);
       setEditServerDetails("");
@@ -411,6 +409,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       <button onClick={() => router.push("/projects")} className="btn-secondary">Back to Projects</button>
     </div>
   );
+  if (!project.canManageProject) return <EmployeeProjectView projectId={projectId} />;
 
   // ── handlers ──────────────────────────────────────────────
   async function handleUpdateProject() {
@@ -428,7 +427,6 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         managerId: editManagerId,
         assignedEmployeeIds: editAssignedEmployeeIds,
         memberPermissions: buildMemberPermissions(),
-        documentUrl: editDocs,
         budgetAmount: budgetNum,
       });
       setProject(updated);
@@ -482,12 +480,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         managerId: editManagerId,
         assignedEmployeeIds: editAssignedEmployeeIds,
         memberPermissions: buildMemberPermissions(),
-        documentUrl: editDocs,
         budgetAmount: editBudget.trim() === "" ? undefined : parseFloat(editBudget),
       });
 
       const existingProfile = projectNotes.find(note => {
-        const decoded = decodeNote(note.content);
+        const decoded = decodeProjectNote(note);
         return decoded.category === category && decoded.isDetailProfile;
       });
       const payload = {
@@ -539,7 +536,6 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         managerId: editManagerId,
         assignedEmployeeIds: editAssignedEmployeeIds,
         memberPermissions: buildMemberPermissions(),
-        documentUrl: editDocs,
         budgetAmount: budgetNum,
       });
       setProject(updated);
@@ -684,9 +680,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       await createProjectPayment(project.id, {
         amount, paidAt: new Date(payWhen).toISOString(),
         referenceNote: payNote.trim() || undefined,
-        attachments: payAttachments.map(({ fileUrl, fileName, fileType }) => ({ fileUrl, fileName, fileType })),
+        idempotencyKey: payIdempotencyKey,
+        attachments: payAttachments
+          .filter(attachment => attachment.mediaAssetId)
+          .map(attachment => ({ mediaAssetId: attachment.mediaAssetId! })),
       });
       setPayAmount(""); setPayWhen(nowDatetimeLocal()); setPayNote(""); setPayAttachments([]);
+      setPayIdempotencyKey(crypto.randomUUID());
       const [updatedProject, pays] = await Promise.all([
         getProject(project.id), getProjectPayments(project.id),
       ]);
@@ -713,8 +713,17 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
     const uploaded: PaymentAttachment[] = [];
     for (const file of files) {
-      const fileUrl = await uploadToCloudinary(file);
-      uploaded.push({ fileUrl, fileName: file.name, fileType: file.type });
+      const media = await uploadFile(file, "PAYMENT_ATTACHMENT");
+      if (media.status !== "VERIFIED") {
+        throw new Error("The bill is quarantined until malware scanning succeeds.");
+      }
+      uploaded.push({
+        mediaAssetId: media.id,
+        downloadUrl: null,
+        fileName: media.originalFilename,
+        fileType: media.detectedMimeType,
+        legacyAssetStatus: "NONE",
+      });
     }
     return uploaded;
   }
@@ -767,7 +776,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       await updateProjectPaymentAttachments(
         project.id,
         editingPaymentBills.id,
-        editedPaymentAttachments.map(({ fileUrl, fileName, fileType }) => ({ fileUrl, fileName, fileType }))
+        editedPaymentAttachments
+          .filter(attachment => attachment.mediaAssetId)
+          .map(attachment => ({ mediaAssetId: attachment.mediaAssetId! }))
       );
       setProjectPayments(await getProjectPayments(project.id));
       setEditingPaymentBills(null);
@@ -789,8 +800,16 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     }
     setUploadingNote(true); setFeedback("");
     const payload = {
-      content: encodeNote({ category: noteCategory, date: noteDate, text: noteText.trim(), attachments }),
+      content: encodeNote({
+        category: noteCategory,
+        date: noteDate,
+        text: noteText.trim(),
+        attachments: [],
+      }),
       noteType,
+      mediaAssetIds: editingNoteId
+        ? undefined
+        : attachments.map(attachment => attachment.mediaAssetId),
     };
     const isEdit = editingNoteId !== null;
     try {
@@ -811,7 +830,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   }
 
   function openNoteForEdit(note: ProjectNote) {
-    const decoded = decodeNote(note.content);
+    const decoded = decodeProjectNote(note);
     setEditingNoteId(note.id);
     setNoteCategory(decoded.category);
     setNoteType(note.noteType);
@@ -941,8 +960,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     }
     setUploadingCommentFile(true);
     try {
-      const url = await uploadToCloudinary(file);
-      setCommentAttachment({ url, name: file.name });
+      const media = await uploadFile(file, "TASK_ATTACHMENT");
+      if (media.status !== "VERIFIED") {
+        throw new Error("The attachment is quarantined until malware scanning succeeds.");
+      }
+      setCommentAttachment({ mediaAssetId: media.id, name: media.originalFilename });
     } catch (err) {
       setFeedbackKind("error");
       setFeedback(err instanceof Error ? err.message : "File upload failed.");
@@ -957,8 +979,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     try {
       await createTaskComment(selectedTask.id, {
         content: commentText.trim(),
-        attachmentUrl: commentAttachment?.url,
-        attachmentName: commentAttachment?.name,
+        mediaAssetId: commentAttachment?.mediaAssetId,
         mentionedUserIds: mentionedUserIdsFromText(commentText, mentionCandidates),
       });
       setCommentText("");
@@ -1069,12 +1090,15 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
       const uploaded: NoteAttachment[] = [];
       for (const file of files) {
-        const url = await uploadToCloudinary(file);
+        const media = await uploadFile(file, "PROJECT_ATTACHMENT");
+        if (media.status !== "VERIFIED") {
+          throw new Error("The attachment is quarantined until malware scanning succeeds.");
+        }
         uploaded.push({
-          url,
-          fileName: file.name,
-          fileType: file.type,
-          kind: fileKind(file.type),
+          mediaAssetId: media.id,
+          fileName: media.originalFilename,
+          fileType: media.detectedMimeType,
+          kind: fileKind(media.detectedMimeType),
         });
       }
       setAttachments(prev => [...prev, ...uploaded]);
@@ -1089,7 +1113,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const publicProjectNotes = projectNotes.filter(note => !isDetailProfileNote(note));
-  const viewingNoteDetails = viewingNote ? decodeNote(viewingNote.content) : null;
+  const viewingNoteDetails = viewingNote ? decodeProjectNote(viewingNote) : null;
 
   // filtered notes for the notes tab
   const visibleNotes = notesFilter === "ALL"
@@ -1571,7 +1595,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   </div>
                   {commentAttachment && (
                     <div className="text-sm text-muted">
-                      Attached: <a href={commentAttachment.url} target="_blank" rel="noreferrer">{commentAttachment.name}</a>
+                      Ready to attach: {commentAttachment.name}
                     </div>
                   )}
                 </div>
@@ -1589,10 +1613,18 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                           <span>{new Date(comment.createdAt).toLocaleString()}</span>
                         </div>
                         <p className="text-sm" style={{ lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{comment.content}</p>
-                        {comment.attachmentUrl && (
-                          <a className="text-sm" href={comment.attachmentUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent-color)", display: "inline-block", marginTop: "10px" }}>
-                            {comment.attachmentName || "Open attachment"}
-                          </a>
+                        {comment.mediaAssetId && (
+                          <button
+                            type="button"
+                            className="text-sm"
+                            onClick={() => void downloadMediaAsset(
+                              comment.mediaAssetId!,
+                              comment.attachmentName || "attachment"
+                            )}
+                            style={{ color: "var(--accent-color)", display: "inline-block", marginTop: "10px" }}
+                          >
+                            {comment.attachmentName || "Download attachment"}
+                          </button>
                         )}
                       </div>
                     ))
@@ -1669,7 +1701,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 {payAttachments.length > 0 && (
                   <div className="payment-bill-list">
                     {payAttachments.map((attachment, index) => (
-                      <div className="payment-bill-file" key={`${attachment.fileUrl}-${index}`}>
+                      <div className="payment-bill-file" key={`${attachment.mediaAssetId}-${index}`}>
                         <span title={attachment.fileName}>{attachment.fileName}</span>
                         <button type="button" aria-label={`Remove ${attachment.fileName}`} onClick={() => setPayAttachments(current => current.filter((_, itemIndex) => itemIndex !== index))}>×</button>
                       </div>
@@ -1711,9 +1743,17 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                           {p.attachments?.length ? (
                             <div className="payment-history-bills">
                               {p.attachments.map(attachment => (
-                                <a key={attachment.id ?? attachment.fileUrl} href={attachment.fileUrl} target="_blank" rel="noreferrer" title={attachment.fileName}>
+                                <button
+                                  type="button"
+                                  key={attachment.id ?? attachment.mediaAssetId}
+                                  onClick={() => attachment.mediaAssetId
+                                    ? void downloadMediaAsset(attachment.mediaAssetId, attachment.fileName)
+                                    : undefined}
+                                  disabled={!attachment.mediaAssetId}
+                                  title={attachment.fileName}
+                                >
                                   {attachment.fileName}
-                                </a>
+                                </button>
                               ))}
                             </div>
                           ) : <span className="text-muted">None</span>}
@@ -1745,7 +1785,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               {ADDITIONAL_DETAIL_SECTIONS.map(section => {
                 const detailNotes = projectNotes
                   .filter(note => {
-                    const decoded = decodeNote(note.content);
+                    const decoded = decodeProjectNote(note);
                     return decoded.category === section.key && !decoded.isDetailProfile;
                   })
                   .sort((a, b) => {
@@ -1845,7 +1885,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     ) : (
                       <div style={{ display: "grid", gap: "10px" }}>
                         {detailNotes.map(note => {
-                          const decoded = decodeNote(note.content);
+                          const decoded = decodeProjectNote(note);
                           const displayDate = decoded.date
                             ? new Date(`${decoded.date}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
                             : new Date(note.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
@@ -1884,9 +1924,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                               {decoded.attachments.length > 0 && (
                                 <div style={{ marginTop: "10px", display: "flex", flexWrap: "wrap", gap: "8px" }}>
                                   {decoded.attachments.map((att, index) => (
-                                    <a key={`${att.url}-${index}`} href={att.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: "0.78rem", color: "var(--primary-color)" }}>
+                                    <button key={`${att.mediaAssetId}-${index}`} type="button" onClick={() => void downloadMediaAsset(att.mediaAssetId, att.fileName)} style={{ fontSize: "0.78rem", color: "var(--primary-color)" }}>
                                       {att.fileName}
-                                    </a>
+                                    </button>
                                   ))}
                                 </div>
                               )}
@@ -1940,7 +1980,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "16px" }}>
               {visibleNotes.map(note => {
-                const decoded = decodeNote(note.content);
+                const decoded = decodeProjectNote(note);
                 const meta = categoryMeta(decoded.category);
                 return (
                   <div key={note.id} className="project-card-static" style={{ padding: "20px" }}>
@@ -2003,20 +2043,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                       <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
                         <div className="text-xs text-muted mb-2">Attachments</div>
                         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                          {decoded.attachments.map((att, i) =>
-                            att.kind === "image" ? (
-                              <a key={i} href={att.url} target="_blank" rel="noopener noreferrer"
-                                style={{ display: "block", borderRadius: "8px", overflow: "hidden",
-                                  border: "1px solid rgba(255,255,255,0.08)" }}>
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={att.url} alt={att.fileName}
-                                  style={{ width: "100%", maxHeight: "160px", objectFit: "cover", display: "block" }} />
-                                <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", padding: "6px 8px" }}>
-                                  {att.fileName}
-                                </div>
-                              </a>
-                            ) : (
-                              <a key={i} href={att.url} target="_blank" rel="noopener noreferrer" download={att.fileName}
+                          {decoded.attachments.map((att, i) => (
+                              <button key={i} type="button" onClick={() => void downloadMediaAsset(att.mediaAssetId, att.fileName)}
                                 style={{ fontSize: "0.82rem", color: "var(--primary-color)", display: "flex",
                                   alignItems: "center", gap: "8px", padding: "8px 10px",
                                   background: "rgba(255,255,255,0.04)", borderRadius: "8px",
@@ -2025,9 +2053,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                   {att.fileName}
                                 </span>
-                              </a>
-                            )
-                          )}
+                              </button>
+                          ))}
                         </div>
                       </div>
                     )}
@@ -2129,13 +2156,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px",
                       background: "rgba(255,255,255,0.04)", borderRadius: "8px", padding: "8px 12px",
                       border: "1px solid var(--border-color)" }}>
-                      {att.kind === "image" ? (
-                        /* eslint-disable-next-line @next/next/no-img-element */
-                        <img src={att.url} alt={att.fileName}
-                          style={{ width: "40px", height: "40px", objectFit: "cover", borderRadius: "6px", flexShrink: 0 }} />
-                      ) : (
-                        <span style={{ fontSize: "1.4rem", flexShrink: 0 }}>📄</span>
-                      )}
+                      <span style={{ fontSize: "1.4rem", flexShrink: 0 }}>📄</span>
                       <span style={{ flex: 1, fontSize: "0.82rem", color: "var(--text-secondary)",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {att.fileName}
@@ -2201,12 +2222,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               <div className="note-detail-attachments">
                 <div className="text-xs text-muted">Attachments</div>
                 {viewingNoteDetails.attachments.map((attachment, index) => (
-                  <a key={`${attachment.url}-${index}`} href={attachment.url} target="_blank" rel="noopener noreferrer" download={attachment.kind === "document" ? attachment.fileName : undefined}>
-                    {attachment.kind === "image" ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={attachment.url} alt={attachment.fileName} />
-                    ) : <span>{attachment.fileName}</span>}
-                  </a>
+                  <button key={`${attachment.mediaAssetId}-${index}`} type="button" onClick={() => void downloadMediaAsset(attachment.mediaAssetId, attachment.fileName)}>
+                    <span>{attachment.fileName}</span>
+                  </button>
                 ))}
               </div>
             )}
@@ -2250,13 +2268,15 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               ) : (
                 <div className="payment-bill-edit-list">
                   {editedPaymentAttachments.map((attachment, index) => (
-                    <div className="payment-bill-edit-item" key={`${attachment.id ?? attachment.fileUrl}-${index}`}>
+                    <div className="payment-bill-edit-item" key={`${attachment.id ?? attachment.mediaAssetId}-${index}`}>
                       <div>
                         <strong>{attachment.fileName}</strong>
                         <span>{attachment.fileType === "application/pdf" ? "PDF document" : "Image"}</span>
                       </div>
                       <div>
-                        <a href={attachment.fileUrl} target="_blank" rel="noreferrer">Open</a>
+                        {attachment.mediaAssetId && (
+                          <button type="button" onClick={() => void downloadMediaAsset(attachment.mediaAssetId!, attachment.fileName)}>Download</button>
+                        )}
                         <button type="button" onClick={() => setEditedPaymentAttachments(current => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button>
                       </div>
                     </div>

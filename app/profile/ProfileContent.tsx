@@ -6,6 +6,7 @@ import {
   AttendanceSession,
   changePassword,
   DailyLog,
+  downloadMediaAsset,
   getAllAttendanceSessions,
   getAllDailyLogs,
   getAllTasks,
@@ -21,6 +22,7 @@ import {
   Project,
   requestEmailChange,
   requestPasswordReset,
+  revokeAllMySessions,
   resendVerificationEmail,
   StaffDocument,
   Task,
@@ -30,7 +32,7 @@ import {
   verifyEmailChange,
 } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
-import { setStoredAuth, updateStoredAuthUser } from "@/lib/auth";
+import { clearAuthSession, setStoredAuth, updateStoredAuthUser } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 
 type Tab = "personal" | "security" | "preferences" | "documents" | "work";
@@ -67,6 +69,7 @@ export default function ProfileContent() {
   const toast = useToast();
 
   const [tab, setTab] = useState<Tab>(initialTab);
+  const [revokingSessions, setRevokingSessions] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -212,8 +215,11 @@ export default function ProfileContent() {
     if (!file) return;
     setUploadingPhoto(true);
     try {
-      const uploaded = await uploadFile(file);
-      const updated = await updateMyProfile({ profilePhotoUrl: uploaded.url });
+      const uploaded = await uploadFile(file, "PROFILE_IMAGE");
+      if (uploaded.status !== "VERIFIED") {
+        throw new Error("The profile image is not ready to attach.");
+      }
+      const updated = await updateMyProfile({ profileMediaAssetId: uploaded.id });
       setProfile(updated);
       updateStoredAuthUser(stored => ({ ...stored, profilePhotoUrl: updated.profilePhotoUrl }));
       toast.success("Profile photo updated.");
@@ -234,16 +240,24 @@ export default function ProfileContent() {
     setSavingPassword(true);
     try {
       await changePassword({ currentPassword, newPassword });
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      const refreshed = await getMyProfile();
-      setProfile(refreshed);
-      toast.success("Password changed successfully.");
+      clearAuthSession();
+      window.location.href = "/login?reason=password-changed";
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to change password");
     } finally {
       setSavingPassword(false);
+    }
+  }
+
+  async function handleRevokeAllSessions() {
+    setRevokingSessions(true);
+    try {
+      await revokeAllMySessions();
+      clearAuthSession();
+      window.location.href = "/login?reason=sessions-revoked";
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to revoke sessions");
+      setRevokingSessions(false);
     }
   }
 
@@ -297,8 +311,8 @@ export default function ProfileContent() {
     const email = profile.email;
     setRecoveringPassword(true);
     try {
-      await requestPasswordReset(email);
-      toast.success("Password reset OTP sent. Check your inbox.");
+      const result = await requestPasswordReset(email);
+      toast.success(result.message);
       router.push(`/reset-password?email=${encodeURIComponent(email)}&mode=forgot`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to send password reset OTP");
@@ -621,6 +635,21 @@ export default function ProfileContent() {
                   {recoveringPassword ? "Sending..." : "Reset with email OTP"}
                 </button>
               </div>
+
+              <div className="profile-recovery">
+                <div>
+                  <strong>Sign out everywhere</strong>
+                  <p>Invalidate every access token for this account, including this browser.</p>
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => void handleRevokeAllSessions()}
+                  disabled={revokingSessions}
+                >
+                  {revokingSessions ? "Revoking..." : "Revoke all sessions"}
+                </button>
+              </div>
             </section>
           )}
 
@@ -685,8 +714,23 @@ export default function ProfileContent() {
                         {document.note && <p>{document.note}</p>}
                       </div>
                       <div className="staff-document-actions">
-                        <a href={document.fileUrl} target="_blank" rel="noreferrer">Open</a>
-                        <a href={document.fileUrl} download={document.fileName}>Download</a>
+                        {document.mediaAssetId ? (
+                          <button
+                            type="button"
+                            onClick={() => void downloadMediaAsset(
+                              document.mediaAssetId!,
+                              document.fileName
+                            ).catch(error => toast.error(
+                              error instanceof Error ? error.message : "Download failed"
+                            ))}
+                          >
+                            Download
+                          </button>
+                        ) : (
+                          <span title="Legacy files require administrator review">
+                            Legacy file unavailable
+                          </span>
+                        )}
                       </div>
                     </article>
                   ))}

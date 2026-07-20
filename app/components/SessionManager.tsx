@@ -94,10 +94,10 @@ export default function SessionManager() {
     return () => window.clearInterval(interval);
   }, []);
 
-  function staySignedIn() {
+  function continueBrowserSession() {
     lastActivityRef.current = Date.now();
     setWarningOpen(false);
-    toast.success("Session extended.");
+    toast.success("Activity timer reset. Your access token expiry is unchanged.");
   }
 
   function logoutNow() {
@@ -110,11 +110,11 @@ export default function SessionManager() {
       open={warningOpen}
       title="Session expiring"
       description={`You have been idle with no active work session. You will be logged out in about ${secondsLeft} seconds.`}
-      confirmLabel="Stay Signed In"
+      confirmLabel="Continue Session"
       cancelLabel="Log Out"
       tone="primary"
       onCancel={logoutNow}
-      onConfirm={staySignedIn}
+      onConfirm={continueBrowserSession}
     />
   );
 }

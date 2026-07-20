@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   getProject, Project, Task, getTasksByProject, getMyTasks,
   createTask, updateTask, deleteTask, updateTaskStatus, TaskStatus, TaskPriority,
-  getTaskComments, createTaskComment, TaskComment, uploadToCloudinary,
+  getTaskComments, createTaskComment, TaskComment, uploadFile, downloadMediaAsset,
   getProjectMilestones, ProjectMilestone,
   getProjectNotes, createProjectNote, ProjectNote,
   getProjectTaskBoards, ProjectTaskBoard,
@@ -18,7 +18,7 @@ import MentionTextarea, { MentionCandidate, mentionedUserIdsFromText } from "@/a
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const NOTE_CATEGORIES = ["GENERAL", "INITIAL_MEETING", "REQUIREMENT_GATHERING", "CHANGES", "FINDING"] as const;
 type NoteCategory = typeof NOTE_CATEGORIES[number];
-type NoteAttachment = { url: string; fileName: string; fileType: string; kind: "image" | "document" };
+type NoteAttachment = { mediaAssetId: string; fileName: string; fileType: string; kind: "image" | "document" };
 
 const getStatusBadgeClass = (s: string) =>
   s === "PLANNED" ? "badge-todo" : s === "ACTIVE" ? "badge-in-progress" :
@@ -49,7 +49,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
   const [taskComments, setTaskComments] = useState<TaskComment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
   const [commentText, setCommentText] = useState("");
-  const [commentAttachment, setCommentAttachment] = useState<{ url: string; name: string } | null>(null);
+  const [commentAttachment, setCommentAttachment] = useState<{ mediaAssetId: string; name: string } | null>(null);
   const [savingComment, setSavingComment] = useState(false);
   const [uploadingCommentFile, setUploadingCommentFile] = useState(false);
   const [feedback, setFeedback] = useState("");
@@ -240,8 +240,9 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
           category: noteCategory,
           date: noteDate,
           text: noteText.trim(),
-          attachments: noteAttachments,
+          attachments: [],
         }),
+        mediaAssetIds: noteAttachments.map(attachment => attachment.mediaAssetId),
       });
       setNoteText("");
       setNoteCategory("GENERAL");
@@ -276,12 +277,18 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
     }
     setUploadingNoteFiles(true);
     try {
-      const uploaded = await Promise.all(files.map(async file => ({
-        url: await uploadToCloudinary(file),
-        fileName: file.name,
-        fileType: file.type,
-        kind: file.type.startsWith("image/") ? "image" as const : "document" as const,
-      })));
+      const uploaded = await Promise.all(files.map(async file => {
+        const media = await uploadFile(file, "PROJECT_ATTACHMENT");
+        if (media.status !== "VERIFIED") {
+          throw new Error("The attachment is quarantined until malware scanning succeeds.");
+        }
+        return {
+          mediaAssetId: media.id,
+          fileName: media.originalFilename,
+          fileType: media.detectedMimeType,
+          kind: media.detectedMimeType.startsWith("image/") ? "image" as const : "document" as const,
+        };
+      }));
       setNoteAttachments(current => [...current, ...uploaded]);
     } catch (err) {
       setFeedbackKind("error");
@@ -317,8 +324,11 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
     }
     setUploadingCommentFile(true);
     try {
-      const url = await uploadToCloudinary(file);
-      setCommentAttachment({ url, name: file.name });
+      const media = await uploadFile(file, "TASK_ATTACHMENT");
+      if (media.status !== "VERIFIED") {
+        throw new Error("The attachment is quarantined until malware scanning succeeds.");
+      }
+      setCommentAttachment({ mediaAssetId: media.id, name: media.originalFilename });
     } catch (err) {
       setFeedbackKind("error");
       setFeedback(err instanceof Error ? err.message : "File upload failed.");
@@ -333,8 +343,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
     try {
       await createTaskComment(selectedTask.id, {
         content: commentText.trim(),
-        attachmentUrl: commentAttachment?.url,
-        attachmentName: commentAttachment?.name,
+        mediaAssetId: commentAttachment?.mediaAssetId,
         mentionedUserIds: mentionedUserIdsFromText(commentText, mentionCandidates),
       });
       setCommentText("");
@@ -396,17 +405,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
         category: parsed.category ?? "GENERAL",
         date: parsed.date ?? "",
         text: parsed.text ?? content,
-        attachments: (parsed.attachments ?? []).map(attachment => {
-          if (typeof attachment === "string") {
-            return {
-              url: attachment,
-              fileName: decodeURIComponent(attachment.split("/").pop()?.split("?")[0] || "attachment"),
-              fileType: "application/octet-stream",
-              kind: /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(attachment) ? "image" as const : "document" as const,
-            };
-          }
-          return attachment;
-        }),
+        attachments: [],
       };
     } catch {
       return { category: "GENERAL", date: "", text: content, attachments: [] };
@@ -417,7 +416,18 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
     return category.split("_").map(word => word[0] + word.slice(1).toLowerCase()).join(" ");
   }
 
-  const viewingNoteDetails = viewingNote ? decodeNote(viewingNote.content) : null;
+  function decodeProjectNote(note: ProjectNote) {
+    const decoded = decodeNote(note.content);
+    decoded.attachments = (note.attachments ?? []).map(attachment => ({
+      mediaAssetId: attachment.mediaAssetId,
+      fileName: attachment.fileName,
+      fileType: attachment.contentType,
+      kind: attachment.contentType.startsWith("image/") ? "image" : "document",
+    }));
+    return decoded;
+  }
+
+  const viewingNoteDetails = viewingNote ? decodeProjectNote(viewingNote) : null;
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -632,7 +642,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
               </div>
               {commentAttachment && (
                 <div className="text-sm text-muted">
-                  Attached: <a href={commentAttachment.url} target="_blank" rel="noreferrer">{commentAttachment.name}</a>
+                  Ready to attach: {commentAttachment.name}
                 </div>
               )}
             </div>
@@ -649,10 +659,13 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
                       <span>{new Date(comment.createdAt).toLocaleString()}</span>
                     </div>
                     <p className="text-sm" style={{ lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{comment.content}</p>
-                    {comment.attachmentUrl && (
-                      <a className="text-sm" href={comment.attachmentUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent-color)", display: "inline-block", marginTop: "10px" }}>
-                        {comment.attachmentName || "Open attachment"}
-                      </a>
+                    {comment.mediaAssetId && (
+                      <button type="button" className="text-sm" onClick={() => void downloadMediaAsset(
+                        comment.mediaAssetId!,
+                        comment.attachmentName || "attachment"
+                      )} style={{ color: "var(--accent-color)", display: "inline-block", marginTop: "10px" }}>
+                        {comment.attachmentName || "Download attachment"}
+                      </button>
                     )}
                   </div>
                 ))
@@ -725,7 +738,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
         </div>
         <div className="employee-note-grid">
           {projectNotes.map(note => {
-            const decoded = decodeNote(note.content);
+            const decoded = decodeProjectNote(note);
             return (
             <article key={note.id} className="employee-note-card">
               <div className="employee-note-card-header">
@@ -749,12 +762,9 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
               {decoded.attachments.length > 0 && (
                 <div className="employee-note-attachments">
                   {decoded.attachments.map((attachment, index) => (
-                    <a key={`${attachment.url}-${index}`} href={attachment.url} target="_blank" rel="noreferrer">
-                      {attachment.kind === "image" ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={attachment.url} alt={attachment.fileName} />
-                      ) : <span>{attachment.fileName}</span>}
-                    </a>
+                    <button key={`${attachment.mediaAssetId}-${index}`} type="button" onClick={() => void downloadMediaAsset(attachment.mediaAssetId, attachment.fileName)}>
+                      <span>{attachment.fileName}</span>
+                    </button>
                   ))}
                 </div>
               )}
@@ -794,7 +804,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
             {noteAttachments.length > 0 && (
               <div className="employee-note-file-list">
                 {noteAttachments.map((attachment, index) => (
-                  <div key={`${attachment.url}-${index}`}>
+                  <div key={`${attachment.mediaAssetId}-${index}`}>
                     <span>{attachment.fileName}</span>
                     <button type="button" onClick={() => setNoteAttachments(current => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button>
                   </div>
@@ -842,12 +852,9 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
               <div className="note-detail-attachments">
                 <div className="text-xs text-muted">Attachments</div>
                 {viewingNoteDetails.attachments.map((attachment, index) => (
-                  <a key={`${attachment.url}-${index}`} href={attachment.url} target="_blank" rel="noreferrer">
-                    {attachment.kind === "image" ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={attachment.url} alt={attachment.fileName} />
-                    ) : <span>{attachment.fileName}</span>}
-                  </a>
+                  <button key={`${attachment.mediaAssetId}-${index}`} type="button" onClick={() => void downloadMediaAsset(attachment.mediaAssetId, attachment.fileName)}>
+                    <span>{attachment.fileName}</span>
+                  </button>
                 ))}
               </div>
             )}

@@ -9,6 +9,7 @@ import {
   AttendanceSession,
   DailyLog,
   deleteStaffDocument,
+  downloadMediaAsset,
   downloadExport,
   getStaffOverview,
   LeaveRequest,
@@ -195,7 +196,19 @@ function DocumentRows({ documents, onDelete }: { documents: StaffDocument[]; onD
             {document.note && <p>{document.note}</p>}
           </div>
           <div className="staff-document-actions">
-            <a href={document.fileUrl} target="_blank" rel="noreferrer">Open file</a>
+            {document.mediaAssetId ? (
+              <button
+                type="button"
+                onClick={() => void downloadMediaAsset(
+                  document.mediaAssetId!,
+                  document.fileName
+                )}
+              >
+                Download
+              </button>
+            ) : (
+              <span title="Legacy files require review">Legacy file unavailable</span>
+            )}
             <button type="button" onClick={() => onDelete(document)}>Remove</button>
           </div>
         </article>
@@ -352,12 +365,18 @@ export default function StaffRecordPage() {
     setSavingDocument(true);
     try {
       setDocumentUploadStep("uploading");
-      const upload = await uploadFile(documentFile);
+      const upload = await uploadFile(documentFile, "HR_DOCUMENT");
+      if (upload.status !== "VERIFIED") {
+        throw new Error(
+          upload.status === "QUARANTINED"
+            ? "The document is quarantined until malware scanning is available."
+            : "The document did not pass upload verification."
+        );
+      }
       setDocumentUploadStep("saving");
       await addStaffDocument(record.staff.id, {
         documentType,
-        fileName: documentFile.name,
-        fileUrl: upload.url,
+        mediaAssetId: upload.id,
         note: documentNote,
       });
       setDocumentFile(null);

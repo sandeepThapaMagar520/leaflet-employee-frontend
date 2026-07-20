@@ -150,6 +150,7 @@ export default function LeavePage() {
       await loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to review request");
+      await loadData();
     } finally {
       setModalWorking(false);
     }
@@ -165,6 +166,7 @@ export default function LeavePage() {
       await loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to cancel request");
+      await loadData();
     } finally {
       setModalWorking(false);
     }
@@ -361,7 +363,7 @@ export default function LeavePage() {
                     <p className="text-sm text-muted mt-3">Review: {request.reviewerNote}</p>
                   )}
                   <div className="flex gap-2 mt-4">
-                    {canReview && request.status === "PENDING" && (
+                    {request.canReview && request.status === "PENDING" && (
                       <>
                         <button type="button" className="btn-primary" style={{ padding: "7px 12px", fontSize: "0.8rem" }} onClick={() => { setReviewTarget({ id: request.id, action: "approve" }); setReviewNote(""); }}>
                           Approve
@@ -371,7 +373,9 @@ export default function LeavePage() {
                         </button>
                       </>
                     )}
-                    {!canReview && request.status === "PENDING" && (
+                    {!request.canReview
+                      && request.userId === user?.userId
+                      && request.status === "PENDING" && (
                       <button type="button" className="btn-secondary" style={{ padding: "7px 12px", fontSize: "0.8rem" }} onClick={() => setCancelTargetId(request.id)}>
                         Cancel Request
                       </button>

@@ -13,6 +13,19 @@ export type ProjectStatus = "PLANNED" | "ACTIVE" | "ON_HOLD" | "COMPLETED";
 export type ProjectNoteType = "TEAM" | "ADMIN_ONLY";
 export type LeaveType = "ANNUAL" | "SICK";
 export type LeaveStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+export type UploadPurpose =
+  | "PROFILE_IMAGE"
+  | "PROJECT_ATTACHMENT"
+  | "TASK_ATTACHMENT"
+  | "PAYMENT_ATTACHMENT"
+  | "HR_DOCUMENT";
+export type MediaStatus =
+  | "PENDING"
+  | "QUARANTINED"
+  | "VERIFIED"
+  | "REJECTED"
+  | "ATTACHED"
+  | "DELETED";
 
 export type LoginPayload = {
   email: string;
@@ -46,6 +59,8 @@ export type Profile = {
   role: Role;
   active: boolean;
   profilePhotoUrl: string | null;
+  profileMediaAssetId: string | null;
+  profilePhotoLegacyStatus: string;
   employeeId: string | null;
   joiningDate: string | null;
   employmentType: EmploymentType;
@@ -146,12 +161,17 @@ export type Project = {
   }[];
   clientNotes: string | null;
   internalNotes: string | null;
-  documentUrl: string | null;
-  budgetAmount: number;
-  totalPaid: number;
+  documentMediaAssetId: string | null;
+  documentDownloadUrl: string | null;
+  documentLegacyStatus: string;
+  budgetAmount: number | null;
+  totalPaid: number | null;
   lastPaymentAmount: number | null;
   lastPaymentAt: string | null;
   lastPaymentNote: string | null;
+  canManageProject: boolean;
+  canViewFinancials: boolean;
+  canRecordPayment: boolean;
   progressPercentage: number;
   createdById: number;
   createdAt: string;
@@ -190,9 +210,11 @@ export type ProjectPayment = {
 
 export type PaymentAttachment = {
   id?: number;
-  fileUrl: string;
+  mediaAssetId: string | null;
+  downloadUrl: string | null;
   fileName: string;
   fileType: string;
+  legacyAssetStatus: string;
 };
 
 export type ProjectNote = {
@@ -201,6 +223,14 @@ export type ProjectNote = {
   noteType: ProjectNoteType;
   createdByName: string;
   createdAt: string;
+  attachments: Array<{
+    mediaAssetId: string;
+    fileName: string;
+    contentType: string;
+    sizeBytes: number;
+    downloadUrl: string;
+  }>;
+  legacyAttachmentStatus: string;
 };
 
 export type Task = {
@@ -225,8 +255,10 @@ export type TaskComment = {
   userId: number;
   userFullName: string;
   content: string;
-  attachmentUrl: string | null;
+  mediaAssetId: string | null;
+  downloadUrl: string | null;
   attachmentName: string | null;
+  legacyAssetStatus: string;
   createdAt: string;
 };
 
@@ -244,6 +276,7 @@ export type LeaveRequest = {
   reviewerNote: string | null;
   reviewedAt: string | null;
   createdAt: string;
+  canReview: boolean;
 };
 
 export type StaffOverview = {
@@ -281,7 +314,9 @@ export type StaffDocument = {
   id: number;
   documentType: StaffDocumentType;
   fileName: string;
-  fileUrl: string;
+  mediaAssetId: string | null;
+  downloadUrl: string | null;
+  legacyAssetStatus: string;
   note: string | null;
   createdAt: string;
 };
@@ -452,6 +487,19 @@ export async function changePassword(payload: { currentPassword: string; newPass
   });
 }
 
+export async function revokeAllMySessions() {
+  return request<{ message: string }>("/users/me/sessions/revoke-all", {
+    method: "POST",
+  });
+}
+
+export async function revokeUserSessions(userId: number, reason?: string) {
+  return request<{ message: string }>(`/users/${userId}/sessions/revoke-all`, {
+    method: "POST",
+    body: JSON.stringify({ reason: reason?.trim() || null }),
+  });
+}
+
 export async function requestEmailChange(newEmail: string) {
   return request<{ message: string }>("/auth/change-email/request", {
     method: "POST",
@@ -521,7 +569,7 @@ export async function updateMyProfile(payload: {
   emergencyContact?: string;
   location?: string;
   timezone?: string;
-  profilePhotoUrl?: string;
+  profileMediaAssetId?: string;
 }) {
   return request<Profile>("/users/me", {
     method: "PUT",
@@ -638,7 +686,7 @@ export async function deleteUser(id: number): Promise<void> {
 
 export async function addStaffDocument(
   userId: number,
-  payload: { documentType: StaffDocumentType; fileName: string; fileUrl: string; note?: string }
+  payload: { documentType: StaffDocumentType; mediaAssetId: string; note?: string }
 ) {
   return request<StaffDocument>(`/users/${userId}/documents`, {
     method: "POST",
@@ -667,7 +715,7 @@ export async function createProject(payload: {
   assignedEmployeeIds?: number[];
   memberPermissions?: ProjectMemberPermission[];
   clientNotes?: string;
-  documentUrl?: string;
+  documentMediaAssetId?: string;
   budgetAmount?: number;
   internalNotes?: string;
 }) {
@@ -734,7 +782,7 @@ export async function updateProject(projectId: number, payload: {
   assignedEmployeeIds?: number[];
   memberPermissions?: ProjectMemberPermission[];
   clientNotes?: string;
-  documentUrl?: string;
+  documentMediaAssetId?: string;
   budgetAmount?: number;
   internalNotes?: string;
 }) {
@@ -768,7 +816,8 @@ export async function createProjectPayment(
     amount: number;
     paidAt: string;
     referenceNote?: string;
-    attachments?: Array<Pick<PaymentAttachment, "fileUrl" | "fileName" | "fileType">>;
+    attachments?: Array<{ mediaAssetId: string }>;
+    idempotencyKey?: string;
   }
 ) {
   return request<ProjectPayment>(`/projects/${projectId}/payments`, {
@@ -780,7 +829,7 @@ export async function createProjectPayment(
 export async function updateProjectPaymentAttachments(
   projectId: number,
   paymentId: number,
-  attachments: Array<Pick<PaymentAttachment, "fileUrl" | "fileName" | "fileType">>
+  attachments: Array<{ mediaAssetId: string }>
 ) {
   return request<ProjectPayment>(`/projects/${projectId}/payments/${paymentId}/attachments`, {
     method: "PUT",
@@ -812,7 +861,7 @@ export async function getTaskComments(taskId: number) {
 
 export async function createTaskComment(
   taskId: number,
-  payload: { content: string; attachmentUrl?: string; attachmentName?: string; mentionedUserIds?: number[] }
+  payload: { content: string; mediaAssetId?: string; mentionedUserIds?: number[] }
 ) {
   return request<TaskComment>(`/tasks/${taskId}/comments`, {
     method: "POST",
@@ -839,9 +888,11 @@ export type AttendanceDayStatus =
   | "IN_PROGRESS"
   | "ON_BREAK"
   | "MISSING_CHECKOUT"
+  | "WORKED_ON_LEAVE"
   | "UNDER_HOURS"
   | "COMPLETED_WITH_GRACE"
-  | "COMPLETED";
+  | "COMPLETED"
+  | "OVERTIME";
 
 export type AttendanceDaySummary = {
   userId: number;
@@ -854,6 +905,8 @@ export type AttendanceDaySummary = {
   requiredMinutes: number;
   graceMinutes: number;
   remainingMinutes: number;
+  overtimeMinutes: number;
+  shortfallMinutes: number;
   status: AttendanceDayStatus;
 };
 
@@ -861,8 +914,11 @@ export async function startAttendanceSession() {
   return request<AttendanceSession>("/attendance/start", { method: "POST" });
 }
 
-export async function startTeamMemberAttendanceSession(userId: number) {
-  return request<AttendanceSession>(`/attendance/users/${userId}/active/start`, { method: "POST" });
+export async function startTeamMemberAttendanceSession(userId: number, reason: string) {
+  return request<AttendanceSession>(`/attendance/users/${userId}/active/start`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
 }
 
 export async function endAttendanceSession() {
@@ -891,8 +947,11 @@ export function endAttendanceSessionOnUnload() {
   }).catch(() => {});
 }
 
-export async function endTeamMemberAttendanceSession(userId: number) {
-  return request<AttendanceSession>(`/attendance/users/${userId}/active/end`, { method: "PATCH" });
+export async function endTeamMemberAttendanceSession(userId: number, reason: string) {
+  return request<AttendanceSession>(`/attendance/users/${userId}/active/end`, {
+    method: "PATCH",
+    body: JSON.stringify({ reason }),
+  });
 }
 
 export async function getMyAttendanceSessions() {
@@ -939,6 +998,7 @@ export type AttendanceCorrection = {
   reviewerNote: string | null;
   reviewedAt: string | null;
   createdAt: string;
+  canReview: boolean;
 };
 
 export async function getAttendanceCorrections() {
@@ -1012,7 +1072,7 @@ export async function getProjectNotes(projectId: number, type?: ProjectNoteType)
 
 export async function createProjectNote(
   projectId: number,
-  payload: { content: string; noteType: ProjectNoteType }
+  payload: { content: string; noteType: ProjectNoteType; mediaAssetIds?: string[] }
 ) {
   return request<ProjectNote>(`/projects/${projectId}/notes`, {
     method: "POST",
@@ -1061,37 +1121,86 @@ export async function deleteProjectMilestone(milestoneId: number): Promise<void>
 }
 
 export type UploadResponse = {
-  url: string;
-  publicId: string | null;
-  resourceType: string;
-  bytes: number;
+  id: string;
+  purpose: UploadPurpose;
+  status: MediaStatus;
+  scanningStatus: string;
+  originalFilename: string;
+  detectedMimeType: string;
+  detectedFormat: string;
+  sizeBytes: number;
+  width: number | null;
+  height: number | null;
+  publicUrl: string | null;
+  createdAt: string;
 };
 
-export async function uploadFile(file: File): Promise<UploadResponse> {
+export async function uploadFile(
+  file: File,
+  purpose: UploadPurpose,
+  signal?: AbortSignal
+): Promise<UploadResponse> {
   const token = getToken();
   const formData = new FormData();
+  formData.append("purpose", purpose);
   formData.append("file", file);
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  signal?.addEventListener("abort", cancel, { once: true });
+  const timeout = window.setTimeout(() => controller.abort(), 60_000);
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}/uploads`, {
+    response = await fetch(`${API_BASE_URL}/media/uploads`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
+      signal: controller.signal,
     });
   } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error(signal?.aborted ? "Upload canceled." : "Upload timed out. Please try again.");
+    }
     if (err instanceof TypeError) {
       throw new Error("Cannot reach the server for file upload.");
     }
     throw err;
+  } finally {
+    window.clearTimeout(timeout);
+    signal?.removeEventListener("abort", cancel);
   }
   if (!response.ok) {
     if (response.status === 401) {
       handleUnauthorized();
     }
-    const errorMessage = await readErrorMessage(response, "/uploads");
+    const errorMessage = await readErrorMessage(response, "/media/uploads");
     throw new Error(errorMessage);
   }
   return response.json() as Promise<UploadResponse>;
+}
+
+export async function deleteUploadedMedia(assetId: string): Promise<void> {
+  await request<void>(`/media/assets/${assetId}`, { method: "DELETE" });
+}
+
+export async function downloadMediaAsset(assetId: string, filename: string): Promise<void> {
+  const token = getToken();
+  const response = await fetch(`${API_BASE_URL}/media/assets/${assetId}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (response.status === 401) {
+    handleUnauthorized();
+    throw new Error("Your session has expired. Please log in again.");
+  }
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `/media/assets/${assetId}/download`));
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function getNotifications() {
@@ -1140,32 +1249,6 @@ export async function downloadExport(
   URL.revokeObjectURL(url);
 }
 
-export async function uploadToCloudinary(file: File): Promise<string> {
-  try {
-    const result = await uploadFile(file);
-    return result.url;
-  } catch (backendError) {
-    const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
-    const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
-    if (!cloudName || !uploadPreset) {
-      throw backendError instanceof Error ? backendError : new Error("File upload failed.");
-    }
-    const resourceType = file.type.startsWith("image/") ? "image" : "raw";
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("upload_preset", uploadPreset);
-    const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`, {
-      method: "POST",
-      body: formData,
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Cloudinary upload failed: ${err}`);
-    }
-    const data = await res.json() as { secure_url: string };
-    return data.secure_url;
-  }
-}
 
 export async function getLeaveRequests() {
   return request<LeaveRequest[]>("/leave-requests");

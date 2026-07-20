@@ -48,6 +48,6 @@ export function clearAuthSession() {
 export function handleUnauthorized() {
   clearAuthSession();
   if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-    window.location.href = "/login";
+    window.location.href = "/login?reason=session-ended";
   }
 }
