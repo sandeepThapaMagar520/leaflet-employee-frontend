@@ -52,7 +52,7 @@ function ResetPasswordContent() {
       toast.success(result.message);
       setStep("otp");
     } catch (requestError) {
-      toast.error(requestError instanceof Error ? requestError.message : "Could not send the OTP.");
+      toast.error(requestError instanceof Error ? requestError.message : "Could not queue the OTP.");
     } finally {
       setLoading(false);
     }

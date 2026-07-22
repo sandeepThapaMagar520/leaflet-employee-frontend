@@ -73,7 +73,7 @@ export default function UsersAdminPage() {
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  async function loadData(nextPage = page) {
+  async function loadData(nextPage = page, signal?: AbortSignal) {
     setLoading(true);
     try {
       const [result, summaryResult] = await Promise.all([
@@ -84,8 +84,8 @@ export default function UsersAdminPage() {
           employmentType: employmentTypeFilter === "ALL" ? undefined : employmentTypeFilter,
           department: departmentFilter === "ALL" ? undefined : departmentFilter,
           incompleteOnly,
-        }),
-        getStaffDirectorySummary(),
+        }, signal),
+        getStaffDirectorySummary(signal),
       ]);
       setUsers(result.content);
       setSummary(summaryResult);
@@ -93,16 +93,21 @@ export default function UsersAdminPage() {
       setTotalPages(result.totalPages);
       setTotalElements(result.totalElements);
     } catch (error) {
+      if (signal?.aborted) return;
       toast.error(error instanceof Error ? error.message : "Failed to load users");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }
 
   useEffect(() => {
     if (authLoading) return;
-    const timer = window.setTimeout(() => void loadData(0), 300);
-    return () => window.clearTimeout(timer);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => void loadData(0, controller.signal), 300);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountStatusFilter, authLoading, departmentFilter, employmentTypeFilter, incompleteOnly, roleFilter, searchQuery, statusFilter]);
 
@@ -377,7 +382,7 @@ export default function UsersAdminPage() {
                 <div className="staff-form-section">
                   <h3>First-time access</h3>
                   <label><span>Temporary one-time password</span><input type="password" value={temporaryPassword} onChange={event => setTemporaryPassword(event.target.value)} required minLength={8} maxLength={100} autoComplete="new-password" placeholder="At least 8 characters" /></label>
-                  <p>The setup link and temporary password are emailed first. OTP verification follows before the employee creates a permanent password.</p>
+                  <p>The setup link and temporary password are queued for email delivery. OTP verification follows before the employee creates a permanent password.</p>
                 </div>
                 <div className="staff-panel-actions">
                   <button type="button" className="btn-secondary" onClick={closePanel}>Cancel</button>

@@ -30,17 +30,20 @@ function EmployeeProjectsPage() {
 
   useEffect(() => {
     if (authLoading) return;
+    const controller = new AbortController();
     void (async () => {
       setLoading(true);
       try {
-        const list = await getProjects();
+        const list = await getProjects(controller.signal);
         setProjects(list.filter(p => p.assignedEmployees?.some(e => e.id === user?.userId)));
       } catch (err) {
+        if (controller.signal.aborted) return;
         toast.error(err instanceof Error ? err.message : "Failed to load projects");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     })();
+    return () => controller.abort();
   }, [authLoading, toast, user?.userId]);
 
   if (authLoading || loading) return <div className="p-8">Loading projects…</div>;
@@ -103,20 +106,24 @@ function AdminProjectsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const list = await getProjects();
+      const list = await getProjects(signal);
       setProjects(list);
     } catch (error) {
+      if (signal?.aborted) return;
       toast.error(error instanceof Error ? error.message : "Failed to load projects");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [toast]);
 
   useEffect(() => {
-    if (!authLoading) void loadData();
+    if (authLoading) return;
+    const controller = new AbortController();
+    void loadData(controller.signal);
+    return () => controller.abort();
   }, [authLoading, loadData]);
 
   if (authLoading) return <div className="p-8">Verifying access...</div>;

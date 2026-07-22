@@ -133,15 +133,15 @@ export default function AttendancePage() {
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER";
   const isAdmin = user?.role === "ADMIN";
 
-  async function loadData(date = filterDate) {
+  async function loadData(date = filterDate, signal?: AbortSignal) {
     try {
       setLoading(true);
       const [active, history, summary, teamDaily, correctionList] = await Promise.all([
-        getActiveAttendanceSession(),
-        canManage ? getAllAttendanceSessions() : getMyAttendanceSessions(),
-        isAdmin ? Promise.resolve(null) : getMyTodayAttendanceSummary(),
-        canManage ? getTeamDailyAttendanceSummary(date) : Promise.resolve([]),
-        getAttendanceCorrections(),
+        getActiveAttendanceSession(signal),
+        canManage ? getAllAttendanceSessions(signal) : getMyAttendanceSessions(signal),
+        isAdmin ? Promise.resolve(null) : getMyTodayAttendanceSummary(signal),
+        canManage ? getTeamDailyAttendanceSummary(date, signal) : Promise.resolve([]),
+        getAttendanceCorrections(signal),
       ]);
       setActiveSession(active);
       setSessions(history);
@@ -152,15 +152,18 @@ export default function AttendancePage() {
         .then(settings => setBreakReminderMinutes(settings.attendance.breakReminderMinutes))
         .catch(() => setBreakReminderMinutes(30));
     } catch (error) {
+      if (signal?.aborted) return;
       toast.error(error instanceof Error ? error.message : "Failed to load attendance data");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }
 
   useEffect(() => {
     if (authLoading) return;
-    void loadData(filterDate);
+    const controller = new AbortController();
+    void loadData(filterDate, controller.signal);
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, canManage, filterDate, user?.role]);
 

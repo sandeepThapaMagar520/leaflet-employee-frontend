@@ -152,7 +152,7 @@ export default function LoginPage() {
             <Link href="/reset-password?mode=setup" style={{ color: "var(--primary-color)", fontWeight: 600 }}>
               Start first-time setup
             </Link>
-            {" "}with the temporary password sent to your email.
+            {" "}with the temporary password delivered to your email.
           </p>
 
         </form>

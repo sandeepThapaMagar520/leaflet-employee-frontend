@@ -49,6 +49,7 @@ export type StaffRegistrationResponse = {
   fullName: string;
   email: string;
   role: Role;
+  notificationDeliveryStatus: "QUEUED" | "SENT" | "FAILED" | "NOT_REQUIRED" | "SUPPRESSED";
   message: string;
 };
 
@@ -84,6 +85,7 @@ export type NotificationPreferences = {
   emailTaskOverdue: boolean;
   emailProjectAssigned: boolean;
   emailLeaveUpdates: boolean;
+  emailAttendanceUpdates: boolean;
 };
 
 export type User = {
@@ -112,8 +114,12 @@ export type PageResponse<T> = {
   content: T[];
   page: number;
   size: number;
+  numberOfElements: number;
   totalElements: number;
   totalPages: number;
+  first: boolean;
+  last: boolean;
+  sort: string[];
 };
 
 export type StaffDirectorySummary = {
@@ -588,8 +594,8 @@ export async function updateNotificationPreferences(payload: Partial<Notificatio
   });
 }
 
-export async function getUsers() {
-  return request<User[]>("/users");
+export async function getUsers(signal?: AbortSignal) {
+  return (await request<PageResponse<User>>("/users?size=100", { signal })).content;
 }
 
 export async function getUsersPaged(page = 0, size = 20, search = "", filters: {
@@ -599,7 +605,7 @@ export async function getUsersPaged(page = 0, size = 20, search = "", filters: {
   employmentType?: EmploymentType;
   department?: string;
   incompleteOnly?: boolean;
-} = {}) {
+} = {}, signal?: AbortSignal) {
   const params = new URLSearchParams({ page: String(page), size: String(size) });
   if (search.trim()) params.set("search", search.trim());
   if (filters.role) params.set("role", filters.role);
@@ -608,11 +614,11 @@ export async function getUsersPaged(page = 0, size = 20, search = "", filters: {
   if (filters.employmentType) params.set("employmentType", filters.employmentType);
   if (filters.department) params.set("department", filters.department);
   if (filters.incompleteOnly) params.set("incompleteOnly", "true");
-  return request<PageResponse<User>>(`/users?${params.toString()}`);
+  return request<PageResponse<User>>(`/users?${params.toString()}`, { signal });
 }
 
-export async function getStaffDirectorySummary() {
-  return request<StaffDirectorySummary>("/users/summary");
+export async function getStaffDirectorySummary(signal?: AbortSignal) {
+  return request<StaffDirectorySummary>("/users/summary", { signal });
 }
 
 export async function getStaffOverview(id: number) {
@@ -698,12 +704,12 @@ export async function deleteStaffDocument(userId: number, documentId: number): P
   await request<void>(`/users/${userId}/documents/${documentId}`, { method: "DELETE" });
 }
 
-export async function getProjects() {
-  return request<Project[]>("/projects");
+export async function getProjects(signal?: AbortSignal) {
+  return (await request<PageResponse<Project>>("/projects?size=100", { signal })).content;
 }
 
-export async function getProject(projectId: number) {
-  return request<Project>(`/projects/${projectId}`);
+export async function getProject(projectId: number, signal?: AbortSignal) {
+  return request<Project>(`/projects/${projectId}`, { signal });
 }
 
 export async function createProject(payload: {
@@ -725,8 +731,8 @@ export async function createProject(payload: {
   });
 }
 
-export async function getMyTasks() {
-  return request<Task[]>("/tasks/me");
+export async function getMyTasks(signal?: AbortSignal) {
+  return (await request<PageResponse<Task>>("/tasks/me?size=100", { signal })).content;
 }
 
 export async function createTask(payload: {
@@ -750,8 +756,8 @@ export async function updateTaskStatus(taskId: number, status: TaskStatus) {
   });
 }
 
-export async function getProjectTaskBoards(projectId: number) {
-  return request<ProjectTaskBoard[]>(`/projects/${projectId}/task-boards`);
+export async function getProjectTaskBoards(projectId: number, signal?: AbortSignal) {
+  return request<ProjectTaskBoard[]>(`/projects/${projectId}/task-boards`, { signal });
 }
 
 export async function createProjectTaskBoard(projectId: number, name: string) {
@@ -799,15 +805,15 @@ export type ProjectMemberPermission = {
 };
 
 export async function getAllTasks() {
-  return request<Task[]>("/tasks");
+  return (await request<PageResponse<Task>>("/tasks?size=100")).content;
 }
 
-export async function getTasksByProject(projectId: number) {
-  return request<Task[]>(`/tasks/project/${projectId}`);
+export async function getTasksByProject(projectId: number, signal?: AbortSignal) {
+  return (await request<PageResponse<Task>>(`/tasks/project/${projectId}?size=100`, { signal })).content;
 }
 
-export async function getProjectPayments(projectId: number) {
-  return request<ProjectPayment[]>(`/projects/${projectId}/payments`);
+export async function getProjectPayments(projectId: number, signal?: AbortSignal) {
+  return (await request<PageResponse<ProjectPayment>>(`/projects/${projectId}/payments?size=100`, { signal })).content;
 }
 
 export async function createProjectPayment(
@@ -856,7 +862,7 @@ export async function updateTask(taskId: number, payload: {
 }
 
 export async function getTaskComments(taskId: number) {
-  return request<TaskComment[]>(`/tasks/${taskId}/comments`);
+  return (await request<PageResponse<TaskComment>>(`/tasks/${taskId}/comments?size=100`)).content;
 }
 
 export async function createTaskComment(
@@ -954,27 +960,29 @@ export async function endTeamMemberAttendanceSession(userId: number, reason: str
   });
 }
 
-export async function getMyAttendanceSessions() {
-  return request<AttendanceSession[]>("/attendance/me");
+export async function getMyAttendanceSessions(signal?: AbortSignal) {
+  return (await request<PageResponse<AttendanceSession>>("/attendance/me?size=100", { signal })).content;
 }
 
-export async function getAllAttendanceSessions() {
-  return request<AttendanceSession[]>("/attendance");
+export async function getAllAttendanceSessions(signal?: AbortSignal) {
+  return (await request<PageResponse<AttendanceSession>>("/attendance?size=100", { signal })).content;
 }
 
-export async function getMyTodayAttendanceSummary() {
-  return request<AttendanceDaySummary>("/attendance/me/today");
+export async function getMyTodayAttendanceSummary(signal?: AbortSignal) {
+  return request<AttendanceDaySummary>("/attendance/me/today", { signal });
 }
 
-export async function getTeamDailyAttendanceSummary(date?: string) {
-  const query = date ? `?date=${encodeURIComponent(date)}` : "";
-  return request<AttendanceDaySummary[]>(`/attendance/daily${query}`);
+export async function getTeamDailyAttendanceSummary(date?: string, signal?: AbortSignal) {
+  const params = new URLSearchParams({ size: "100" });
+  if (date) params.set("date", date);
+  return (await request<PageResponse<AttendanceDaySummary>>(`/attendance/daily?${params}`, { signal })).content;
 }
 
-export async function getActiveAttendanceSession() {
+export async function getActiveAttendanceSession(signal?: AbortSignal) {
   const token = getToken();
   const response = await fetch(`${API_BASE_URL}/attendance/active`, {
-    headers: { Authorization: `Bearer ${token}` }
+    headers: { Authorization: `Bearer ${token}` },
+    signal,
   });
   if (response.status === 204) return null;
   if (!response.ok) throw new Error("Failed to fetch active session");
@@ -1001,8 +1009,8 @@ export type AttendanceCorrection = {
   canReview: boolean;
 };
 
-export async function getAttendanceCorrections() {
-  return request<AttendanceCorrection[]>("/attendance/corrections");
+export async function getAttendanceCorrections(signal?: AbortSignal) {
+  return (await request<PageResponse<AttendanceCorrection>>("/attendance/corrections?size=100", { signal })).content;
 }
 
 export async function createAttendanceCorrection(payload: {
@@ -1057,17 +1065,18 @@ export async function updateDailyLog(
 }
 
 export async function getMyDailyLogs() {
-  return request<DailyLog[]>("/logs/me");
+  return (await request<PageResponse<DailyLog>>("/logs/me?size=100")).content;
 }
 
 export async function getAllDailyLogs() {
-  return request<DailyLog[]>("/logs");
+  return (await request<PageResponse<DailyLog>>("/logs?size=100")).content;
 }
 
 // Project Notes
-export async function getProjectNotes(projectId: number, type?: ProjectNoteType) {
-  const query = type ? `?type=${type}` : "";
-  return request<ProjectNote[]>(`/projects/${projectId}/notes${query}`);
+export async function getProjectNotes(projectId: number, type?: ProjectNoteType, signal?: AbortSignal) {
+  const params = new URLSearchParams({ size: "100" });
+  if (type) params.set("type", type);
+  return (await request<PageResponse<ProjectNote>>(`/projects/${projectId}/notes?${params}`, { signal })).content;
 }
 
 export async function createProjectNote(
@@ -1094,8 +1103,8 @@ export async function updateProjectNote(
   });
 }
 
-export async function getProjectMilestones(projectId: number) {
-  return request<ProjectMilestone[]>(`/projects/${projectId}/milestones`);
+export async function getProjectMilestones(projectId: number, signal?: AbortSignal) {
+  return request<ProjectMilestone[]>(`/projects/${projectId}/milestones`, { signal });
 }
 
 export async function createProjectMilestone(
@@ -1203,12 +1212,12 @@ export async function downloadMediaAsset(assetId: string, filename: string): Pro
   URL.revokeObjectURL(url);
 }
 
-export async function getNotifications() {
-  return request<Notification[]>("/notifications");
+export async function getNotifications(signal?: AbortSignal) {
+  return (await request<PageResponse<Notification>>("/notifications?size=50", { signal })).content;
 }
 
-export async function getUnreadNotificationCount() {
-  return request<{ count: number }>("/notifications/unread-count");
+export async function getUnreadNotificationCount(signal?: AbortSignal) {
+  return request<{ count: number }>("/notifications/unread-count", { signal });
 }
 
 export async function markNotificationRead(id: number) {
@@ -1250,12 +1259,12 @@ export async function downloadExport(
 }
 
 
-export async function getLeaveRequests() {
-  return request<LeaveRequest[]>("/leave-requests");
+export async function getLeaveRequests(signal?: AbortSignal) {
+  return (await request<PageResponse<LeaveRequest>>("/leave-requests?size=100", { signal })).content;
 }
 
-export async function getLeaveBalance() {
-  return request<LeaveBalance>("/leave-requests/balance");
+export async function getLeaveBalance(signal?: AbortSignal) {
+  return request<LeaveBalance>("/leave-requests/balance", { signal });
 }
 
 export async function createLeaveRequest(payload: {

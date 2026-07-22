@@ -265,9 +265,9 @@ export default function ProfileContent() {
     setResending(true);
     try {
       await resendVerificationEmail();
-      toast.success("Verification email sent. Check your inbox.");
+      toast.success("Verification email queued. Delivery may take a moment.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to resend verification email");
+      toast.error(error instanceof Error ? error.message : "Failed to queue verification email");
     } finally {
       setResending(false);
     }
@@ -671,6 +671,7 @@ export default function ProfileContent() {
                   ["emailTaskOverdue", "Overdue tasks", "Alerts when a task passes its due date"],
                   ["emailProjectAssigned", "Project assignments", "When you are added to a project"],
                   ["emailLeaveUpdates", "Leave updates", "Decisions and changes to leave requests"],
+                  ["emailAttendanceUpdates", "Attendance updates", "Decisions on attendance correction requests"],
                 ] as const).map(([key, label, description]) => (
                   <label key={key}>
                     <span>

@@ -85,23 +85,26 @@ export default function LeavePage() {
   const canReview = user?.role === "ADMIN" || user?.role === "MANAGER";
   const canSubmitLeave = user?.role !== "ADMIN";
 
-  async function loadData() {
+  async function loadData(signal?: AbortSignal) {
     setLoading(true);
     try {
-      const [requestList, balanceData] = await Promise.all([getLeaveRequests(), getLeaveBalance()]);
+      const [requestList, balanceData] = await Promise.all([getLeaveRequests(signal), getLeaveBalance(signal)]);
       setRequests(requestList);
       setBalance(balanceData);
     } catch (error) {
+      if (signal?.aborted) return;
       toast.error(error instanceof Error ? error.message : "Failed to load leave requests");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }
 
   useEffect(() => {
     if (!authLoading) {
       if (canReview) setStatusFilter("PENDING");
-      void loadData();
+      const controller = new AbortController();
+      void loadData(controller.signal);
+      return () => controller.abort();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, canReview]);

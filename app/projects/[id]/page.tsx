@@ -313,12 +313,6 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     else toast.error(feedback);
   }, [feedback, feedbackKind, toast]);
 
-  useEffect(() => {
-    if (!feedback) return;
-    if (feedbackKind === "success") toast.success(feedback);
-    else toast.error(feedback);
-  }, [feedback, feedbackKind, toast]);
-
   // ── Escape key closes modal ────────────────────────────────
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -329,10 +323,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   }, []);
 
   // ── load ──────────────────────────────────────────────────
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setFeedback("");
     try {
-      const data = await getProject(projectId);
+      const data = await getProject(projectId, signal);
       setProject(data);
       if (!data.canManageProject) {
         return;
@@ -355,12 +349,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       setPayWhen(nowDatetimeLocal());
       setLoadingTasks(true); setLoadingPayments(true); setLoadingNotes(true);
       const [tasks, pays, notes, users, milestoneList, boards] = await Promise.all([
-        getTasksByProject(projectId),
-        getProjectPayments(projectId),
-        getProjectNotes(projectId),
-        getUsers(),
-        getProjectMilestones(projectId),
-        getProjectTaskBoards(projectId),
+        getTasksByProject(projectId, signal),
+        getProjectPayments(projectId, signal),
+        getProjectNotes(projectId, undefined, signal),
+        getUsers(signal),
+        getProjectMilestones(projectId, signal),
+        getProjectTaskBoards(projectId, signal),
       ]);
       setProjectTasks(tasks); setProjectPayments(pays); setProjectNotes(notes);
       const domainProfile = detailProfileFromNotes(notes, "DOMAIN_DETAILS");
@@ -378,15 +372,21 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       setManagers(users.filter(u => u.role === "ADMIN" || u.role === "MANAGER"));
       setEmployees(users.filter(u => u.role === "EMPLOYEE"));
     } catch (err) {
+      if (signal?.aborted) return;
       setFeedbackKind("error");
       setFeedback(err instanceof Error ? err.message : "Failed to load project");
     } finally {
-      setLoading(false); setLoadingTasks(false); setLoadingPayments(false); setLoadingNotes(false);
+      if (!signal?.aborted) {
+        setLoading(false); setLoadingTasks(false); setLoadingPayments(false); setLoadingNotes(false);
+      }
     }
   }, [projectId]);
 
   useEffect(() => {
-    if (!authLoading && user?.role !== "EMPLOYEE" && !Number.isNaN(projectId)) void loadData();
+    if (authLoading || user?.role === "EMPLOYEE" || Number.isNaN(projectId)) return;
+    const controller = new AbortController();
+    void loadData(controller.signal);
+    return () => controller.abort();
   }, [authLoading, loadData, projectId, user?.role]);
 
   const mentionCandidates = useMemo<MentionCandidate[]>(() => {

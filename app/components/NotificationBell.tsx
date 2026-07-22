@@ -39,12 +39,16 @@ export default function NotificationBell() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const refreshAbortRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
+    refreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
     try {
       const [{ count }, list] = await Promise.all([
-        getUnreadNotificationCount(),
-        getNotifications(),
+        getUnreadNotificationCount(controller.signal),
+        getNotifications(controller.signal),
       ]);
       setUnread(count);
       setNotifications(list.slice(0, 20));
@@ -56,7 +60,10 @@ export default function NotificationBell() {
   useEffect(() => {
     void refresh();
     const interval = window.setInterval(() => void refresh(), 60000);
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearInterval(interval);
+      refreshAbortRef.current?.abort();
+    };
   }, [refresh]);
 
   useEffect(() => {

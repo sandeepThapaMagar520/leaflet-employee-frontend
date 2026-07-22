@@ -87,9 +87,9 @@ export default function ProfileMenu() {
     setResending(true);
     try {
       await resendVerificationEmail();
-      toast.success("Verification email sent. Check your inbox.");
+      toast.success("Verification email queued. Delivery may take a moment.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to resend verification email");
+      toast.error(error instanceof Error ? error.message : "Failed to queue verification email");
     } finally {
       setResending(false);
     }

@@ -81,17 +81,17 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
     else toast.error(feedback);
   }, [feedback, feedbackKind, toast]);
 
-  async function loadData() {
+  async function loadData(signal?: AbortSignal) {
     setLoading(true);
     setFeedback("");
     try {
       const [proj, tasks, assigned, notes, milestoneList, boards] = await Promise.all([
-        getProject(projectId),
-        getTasksByProject(projectId),
-        getMyTasks(),
-        getProjectNotes(projectId),
-        getProjectMilestones(projectId),
-        getProjectTaskBoards(projectId),
+        getProject(projectId, signal),
+        getTasksByProject(projectId, signal),
+        getMyTasks(signal),
+        getProjectNotes(projectId, undefined, signal),
+        getProjectMilestones(projectId, signal),
+        getProjectTaskBoards(projectId, signal),
       ]);
       const isAssigned = proj.assignedEmployees?.some(e => e.id === user?.userId);
       if (!isAssigned) {
@@ -107,16 +107,22 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
       setMilestones(milestoneList);
       setTaskBoards(boards);
     } catch (err) {
+      if (signal?.aborted) return;
       setFeedbackKind("error");
       setFeedback(err instanceof Error ? err.message : "Failed to load project");
     } finally {
-      setLoading(false);
-      setLoadingTasks(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+        setLoadingTasks(false);
+      }
     }
   }
 
   useEffect(() => {
-    if (!authLoading && user && !Number.isNaN(projectId)) void loadData();
+    if (authLoading || !user || Number.isNaN(projectId)) return;
+    const controller = new AbortController();
+    void loadData(controller.signal);
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, projectId, user?.userId]);
 

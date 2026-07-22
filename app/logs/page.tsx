@@ -125,13 +125,15 @@ export default function LogsPage() {
 
     setExporting(true);
     try {
-      const rangeLabel = filterFrom || filterTo
-        ? `${filterFrom || "start"}-to-${filterTo || "latest"}`
-        : "all";
+      const defaultFrom = filterTo ? new Date(`${filterTo}T12:00:00`) : new Date();
+      defaultFrom.setDate(defaultFrom.getDate() - 30);
+      const exportFrom = filterFrom || formatLocalDate(defaultFrom);
+      const exportTo = filterTo || today;
+      const rangeLabel = `${exportFrom}-to-${exportTo}`;
       await downloadExport(
         "logs",
         `daily-logs-${rangeLabel}.csv`,
-        filterFrom || filterTo ? { from: filterFrom || undefined, to: filterTo || undefined } : undefined
+        { from: exportFrom, to: exportTo }
       );
       toast.success("Daily logs exported.");
     } catch (error) {
