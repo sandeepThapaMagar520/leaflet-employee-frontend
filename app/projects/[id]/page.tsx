@@ -14,6 +14,7 @@ import {
   getUsers, User, ProjectMemberPermission,
   getProjectTaskBoards, createProjectTaskBoard, reorderProjectTaskBoards, ProjectTaskBoard,
 } from "@/lib/api";
+import { MEDIA_FILE_ACCEPT, PDF_STRUCTURE_WARNING } from "@/lib/media-policy";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import ActionModal from "@/app/components/ActionModal";
@@ -108,8 +109,8 @@ const ACCEPTED_MIME_TYPES = new Set([
   "image/jpeg", "image/png",
   "application/pdf",
 ]);
-const FILE_INPUT_ACCEPT = ".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf";
-const PAYMENT_BILL_ACCEPT = ".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf";
+const FILE_INPUT_ACCEPT = MEDIA_FILE_ACCEPT;
+const PAYMENT_BILL_ACCEPT = MEDIA_FILE_ACCEPT;
 const MAX_PAYMENT_BILLS = 5;
 const PAYMENT_BILL_MIME_TYPES = new Set(["image/jpeg", "image/png", "application/pdf"]);
 
@@ -715,7 +716,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     for (const file of files) {
       const media = await uploadFile(file, "PAYMENT_ATTACHMENT");
       if (media.status !== "VERIFIED") {
-        throw new Error("The bill is quarantined until malware scanning succeeds.");
+        throw new Error("The bill did not pass upload verification.");
       }
       uploaded.push({
         mediaAssetId: media.id,
@@ -962,7 +963,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     try {
       const media = await uploadFile(file, "TASK_ATTACHMENT");
       if (media.status !== "VERIFIED") {
-        throw new Error("The attachment is quarantined until malware scanning succeeds.");
+        throw new Error("The attachment did not pass upload verification.");
       }
       setCommentAttachment({ mediaAssetId: media.id, name: media.originalFilename });
     } catch (err) {
@@ -1081,7 +1082,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     try {
       for (const file of files) {
         if (!ACCEPTED_MIME_TYPES.has(file.type)) {
-          throw new Error(`"${file.name}" is not supported. Use images (JPG, PNG, GIF, WebP) or documents (PDF, DOC, DOCX).`);
+          throw new Error(`"${file.name}" is not supported. Use PDF, JPG, or PNG.`);
         }
         if (file.size > MAX_FILE_SIZE) {
           throw new Error(`"${file.name}" exceeds the 10MB limit.`);
@@ -1092,7 +1093,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       for (const file of files) {
         const media = await uploadFile(file, "PROJECT_ATTACHMENT");
         if (media.status !== "VERIFIED") {
-          throw new Error("The attachment is quarantined until malware scanning succeeds.");
+          throw new Error("The attachment did not pass upload verification.");
         }
         uploaded.push({
           mediaAssetId: media.id,
@@ -1582,6 +1583,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   <input
                     ref={commentFileInputRef}
                     type="file"
+                    accept={MEDIA_FILE_ACCEPT}
                     style={{ display: "none" }}
                     onChange={e => void handleCommentFileSelect(e)}
                   />
@@ -1688,6 +1690,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   <div>
                     <strong>Bills and receipts</strong>
                     <span>Optional · PDF, JPG, or PNG · up to {MAX_PAYMENT_BILLS}</span>
+                    <span>{PDF_STRUCTURE_WARNING}</span>
                   </div>
                   <button
                     type="button"
@@ -2131,7 +2134,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             <div style={{ marginBottom: "24px" }}>
               <label className="text-xs text-muted block mb-2" style={{ textTransform: "uppercase", letterSpacing: "0.05em" }}>Attachments</label>
               <p className="text-xs text-muted mb-3">
-                Upload images (JPG, PNG, GIF, WebP) or documents (PDF, DOC, DOCX). Max 10MB each, up to {MAX_ATTACHMENTS} files.
+                Upload PDF, JPG, or PNG files. Max 10MB each, up to {MAX_ATTACHMENTS} files. {PDF_STRUCTURE_WARNING}
               </p>
               <input ref={fileInputRef} type="file" multiple accept={FILE_INPUT_ACCEPT}
                 onChange={e => void handleFileSelect(e)} style={{ display: "none" }} />

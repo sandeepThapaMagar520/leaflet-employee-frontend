@@ -21,6 +21,7 @@ import {
   updateStaffLeaveBalance,
   uploadFile,
 } from "@/lib/api";
+import { PDF_STRUCTURE_WARNING } from "@/lib/media-policy";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 
@@ -367,11 +368,7 @@ export default function StaffRecordPage() {
       setDocumentUploadStep("uploading");
       const upload = await uploadFile(documentFile, "HR_DOCUMENT");
       if (upload.status !== "VERIFIED") {
-        throw new Error(
-          upload.status === "QUARANTINED"
-            ? "The document is quarantined until malware scanning is available."
-            : "The document did not pass upload verification."
-        );
+        throw new Error("The document did not pass upload verification.");
       }
       setDocumentUploadStep("saving");
       await addStaffDocument(record.staff.id, {
@@ -616,10 +613,11 @@ export default function StaffRecordPage() {
                 <input
                   key={documentFileKey}
                   type="file"
-                  accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.txt"
+                  accept=".pdf,application/pdf"
                   onChange={event => setDocumentFile(event.target.files?.[0] ?? null)}
                 />
-                <small>{documentFile ? `${documentFile.name} · ${formatBytes(documentFile.size)}` : "PDF, Word, image, or text file up to 10 MB"}</small>
+                <small>{documentFile ? `${documentFile.name} · ${formatBytes(documentFile.size)}` : "PDF file up to 10 MB"}</small>
+                <small>{PDF_STRUCTURE_WARNING}</small>
               </label>
               <label>
                 <span>Note</span>

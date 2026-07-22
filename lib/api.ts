@@ -26,6 +26,14 @@ export type MediaStatus =
   | "REJECTED"
   | "ATTACHED"
   | "DELETED";
+export type MediaScanningStatus =
+  | "NOT_REQUIRED"
+  | "PENDING"
+  | "CLEAN"
+  | "STRUCTURE_VALIDATED"
+  | "MALWARE_DETECTED"
+  | "FAILED"
+  | "UNAVAILABLE";
 
 export type LoginPayload = {
   email: string;
@@ -1133,7 +1141,7 @@ export type UploadResponse = {
   id: string;
   purpose: UploadPurpose;
   status: MediaStatus;
-  scanningStatus: string;
+  scanningStatus: MediaScanningStatus;
   originalFilename: string;
   detectedMimeType: string;
   detectedFormat: string;

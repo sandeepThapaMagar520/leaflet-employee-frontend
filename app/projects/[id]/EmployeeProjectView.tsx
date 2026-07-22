@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import ProjectKanban from "@/app/components/ProjectKanban";
 import MentionTextarea, { MentionCandidate, mentionedUserIdsFromText } from "@/app/components/MentionTextarea";
+import { MEDIA_FILE_ACCEPT, PDF_STRUCTURE_WARNING } from "@/lib/media-policy";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const NOTE_CATEGORIES = ["GENERAL", "INITIAL_MEETING", "REQUIREMENT_GATHERING", "CHANGES", "FINDING"] as const;
@@ -286,7 +287,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
       const uploaded = await Promise.all(files.map(async file => {
         const media = await uploadFile(file, "PROJECT_ATTACHMENT");
         if (media.status !== "VERIFIED") {
-          throw new Error("The attachment is quarantined until malware scanning succeeds.");
+          throw new Error("The attachment did not pass upload verification.");
         }
         return {
           mediaAssetId: media.id,
@@ -332,7 +333,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
     try {
       const media = await uploadFile(file, "TASK_ATTACHMENT");
       if (media.status !== "VERIFIED") {
-        throw new Error("The attachment is quarantined until malware scanning succeeds.");
+        throw new Error("The attachment did not pass upload verification.");
       }
       setCommentAttachment({ mediaAssetId: media.id, name: media.originalFilename });
     } catch (err) {
@@ -635,6 +636,7 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
               <input
                 ref={commentFileInputRef}
                 type="file"
+                accept={MEDIA_FILE_ACCEPT}
                 style={{ display: "none" }}
                 onChange={e => void handleCommentFileSelect(e)}
               />
@@ -800,9 +802,9 @@ export default function EmployeeProjectView({ projectId }: { projectId: number }
             </label>
             <label className="employee-field-label"><span>Date</span><input type="date" value={noteDate} onChange={event => setNoteDate(event.target.value)} /></label>
             <label className="employee-field-label"><span>Note</span><textarea value={noteText} onChange={event => setNoteText(event.target.value)} rows={6} placeholder="Write a useful update, finding, or meeting note..." /></label>
-            <input ref={noteFileInputRef} type="file" multiple style={{ display: "none" }} onChange={event => void handleNoteFiles(event)} />
+            <input ref={noteFileInputRef} type="file" multiple accept={MEDIA_FILE_ACCEPT} style={{ display: "none" }} onChange={event => void handleNoteFiles(event)} />
             <div className="employee-note-upload">
-              <div><strong>Attachments</strong><span>Images and documents, up to 10MB each</span></div>
+              <div><strong>Attachments</strong><span>PDF, JPG, or PNG, up to 10MB each. {PDF_STRUCTURE_WARNING}</span></div>
               <button type="button" className="btn-secondary" disabled={uploadingNoteFiles} onClick={() => noteFileInputRef.current?.click()}>
                 {uploadingNoteFiles ? "Uploading..." : "Choose files"}
               </button>
